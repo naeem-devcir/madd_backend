@@ -1,0 +1,49 @@
+
+SOME ROUTES ERROR
+================START=====================
+
+{{base_url}}/api/v1/catalog/search?store_id={{store_id}}&query=shoe
+{{base_url}}/api/v1/products/{productId}/reviews
+
+================End=====================
+
+
+
+
+{
+    "success": true,
+    "message": "Login successful",
+    "data": {
+        "user": {
+            "id": "671402da-b30f-4117-be96-bfc711b18c35",
+            "email": "pifavs27asd57asd3@fpxnet.com",
+            "phone": "03001234567",
+            "first_name": "Fakhir",
+            "last_name": "Singhania",
+            "full_name": "Fakhir Singhania",
+            "avatar_url": "https://ui-avatars.com/api/?name=Fakhir+Singhania&background=4F46E5&color=ffffff",
+            "user_type": "vendor",
+            "status": "active",
+            "is_email_verified": true,
+            "is_phone_verified": false,
+            "is_kyc_verified": false,
+            "country_code": "PK",
+            "locale": "en",
+            "timezone": "UTC",
+            "created_at": "2026-04-07T21:40:09+00:00",
+            "updated_at": "2026-04-07T23:43:16+00:00",
+            "vendor": null,
+            "mlm_agent": null,
+            "roles": [
+                "vendor"
+            ],
+            "permissions": []
+        },
+        "access_token": "7|AL3kcnbLKNA9xBeO5wMrNvOmTb4l59zCbB3X2Vhlc80aef07",
+        "refresh_token": "WrXa3IaS2spQNYT1VGrUnirg3r3fDKkLM3DkeSW4zsCsRFKFT0CDiTzkcDXPo0Sj",
+        "magento_token": null,
+        "token_type": "Bearer",
+        "expires_in": 86400,
+        "permissions": []
+    }
+}

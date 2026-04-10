@@ -1,0 +1,22 @@
+
+POST http://127.0.0.1:8000/api/v1/auth/register
+
+{
+  "email": "pifav2757sd3@fpxnet.com",
+  "password": "12345678",
+  "password_confirmation": "12345678",
+  "first_name": "Fakhir",
+  "last_name": "Singhania",
+  "user_type": "vendor",
+  "country_code": "PK",
+  "company_name": "Naeem Magento",
+  "address_line1": "Street 12, Block A",
+  "city": "Lucknow",
+  "postal_code": "7405600",
+
+  "phone": "03001234567",
+  "locale": "en",
+  "marketing_opt_in": true
+}
+
+POST http://127.0.0.1:8000/api/v1/auth/login
