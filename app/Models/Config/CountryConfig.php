@@ -34,48 +34,48 @@ class CountryConfig extends Model
     ];
 
     // ========== Relationships ==========
-    
+
     public function maddCompany()
     {
         return $this->belongsTo(MaddCompany::class, 'madd_company_id', 'id');
     }
-    
+
     public function salesPolicies()
     {
         return $this->hasMany(SalesPolicy::class, 'country_code', 'code');
     }
-    
+
     public function vendors()
     {
         return $this->hasMany(Vendor::class, 'country_code', 'code');
     }
-    
+
     // ========== Scopes ==========
-    
+
     public function scopeActive($query)
     {
         return $query->where('is_active', true);
     }
-    
+
     public function scopeEuMembers($query)
     {
         return $query->where('eu_member', true);
     }
-    
+
     // ========== Accessors ==========
-    
+
     public function getIsEuMemberAttribute(): bool
     {
         return (bool) $this->eu_member;
     }
-    
+
     public function getFormattedTaxRateAttribute(): string
     {
-        return $this->tax_rate . '%';
+        return $this->tax_rate.'%';
     }
-    
+
     // ========== Methods ==========
-    
+
     public function getDefaultLanguage(): string
     {
         return $this->language_codes[0] ?? 'en';

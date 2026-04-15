@@ -34,80 +34,80 @@ class MlmCommission extends Model
     ];
 
     // ========== Relationships ==========
-    
+
     public function agent()
     {
-        return $this->belongsTo(MlmAgent::class, 'agent_id', 'uuid');
+        return $this->belongsTo(MlmAgent::class, 'agent_id', 'id');
     }
-    
+
     public function settlement()
     {
-        return $this->belongsTo(Settlement::class, 'settlement_id', 'uuid');
+        return $this->belongsTo(Settlement::class, 'settlement_id', 'id');
     }
-    
+
     public function source()
     {
         return $this->morphTo();
     }
-    
+
     // ========== Scopes ==========
-    
+
     public function scopePending($query)
     {
         return $query->where('status', 'pending');
     }
-    
+
     public function scopeApproved($query)
     {
         return $query->where('status', 'approved');
     }
-    
+
     public function scopePaid($query)
     {
         return $query->where('status', 'paid');
     }
-    
+
     // ========== Accessors ==========
-    
+
     public function getFormattedAmountAttribute(): string
     {
-        return $this->currency_code . ' ' . number_format($this->amount, 2);
+        return $this->currency_code.' '.number_format($this->amount, 2);
     }
-    
+
     public function getIsPendingAttribute(): bool
     {
         return $this->status === 'pending';
     }
-    
+
     public function getIsApprovedAttribute(): bool
     {
         return $this->status === 'approved';
     }
-    
+
     public function getIsPaidAttribute(): bool
     {
         return $this->status === 'paid';
     }
-    
+
     // ========== Methods ==========
-    
+
     public function approve(): void
     {
         $this->status = 'approved';
         $this->save();
     }
-    
+
     public function markAsPaid(string $settlementId): void
     {
         $this->status = 'paid';
         $this->settlement_id = $settlementId;
         $this->paid_at = now();
         $this->save();
-        
+
         // Update agent total
         $this->agent->increment('total_commissions_earned', $this->amount);
     }
-    
+
     public function reject(string $reason): void
     {
         $this->status = 'rejected';

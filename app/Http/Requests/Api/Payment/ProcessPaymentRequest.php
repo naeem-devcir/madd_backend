@@ -35,7 +35,7 @@ class ProcessPaymentRequest extends FormRequest
         if ($this->payment_method === 'credit_card') {
             $rules['card_number'] = 'required|string|size:16';
             $rules['card_expiry_month'] = 'required|string|size:2|in:01,02,03,04,05,06,07,08,09,10,11,12';
-            $rules['card_expiry_year'] = 'required|string|size:4|min:' . date('Y');
+            $rules['card_expiry_year'] = 'required|string|size:4|min:'.date('Y');
             $rules['card_cvv'] = 'required|string|size:3|max:4';
             $rules['card_holder_name'] = 'required|string|max:255';
         }

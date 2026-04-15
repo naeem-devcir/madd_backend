@@ -1,8 +1,9 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api;
 use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Facades\Route;
+
 /*
 |--------------------------------------------------------------------------
 | API Routes
@@ -28,7 +29,7 @@ Route::prefix('v1')->group(function () {
         return response()->json([
             'status' => 'healthy',
             'timestamp' => now()->toIso8601String(),
-            'version' => '1.0.0'
+            'version' => '1.0.0',
         ]);
     });
 
@@ -72,7 +73,7 @@ Route::prefix('v1')->group(function () {
         Route::get('reset-password/{token}', function ($token) {
             return response()->json([
                 'token' => $token,
-                'message' => 'Use this token to reset your password'
+                'message' => 'Use this token to reset your password',
             ]);
         })->name('password.reset');
 
@@ -207,7 +208,7 @@ Route::prefix('v1')->group(function () {
         Route::get('dashboard', [Api\Vendor\VendorDashboardController::class, 'index']);
         Route::get('statistics', [Api\Vendor\VendorDashboardController::class, 'statistics']);
 
-        // Profile Management
+    // Profile Management
         Route::prefix('profile')->group(function () {
             Route::get('/', [Api\Vendor\VendorProfileController::class, 'show']);
             Route::put('/', [Api\Vendor\VendorProfileController::class, 'update']);
@@ -233,12 +234,12 @@ Route::prefix('v1')->group(function () {
             Route::get('/', [Api\Vendor\VendorProductController::class, 'index']);
             Route::post('/', [Api\Vendor\VendorProductController::class, 'store']);
             Route::get('drafts', [Api\Vendor\VendorProductController::class, 'drafts']);
-            Route::get('{id}', [Api\Vendor\VendorProductController::class, 'show']);
-            Route::put('{id}', [Api\Vendor\VendorProductController::class, 'update']);
-            Route::delete('{id}', [Api\Vendor\VendorProductController::class, 'destroy']);
-            Route::put('{id}/inventory', [Api\Vendor\VendorProductController::class, 'updateInventory']);
-            Route::post('{id}/duplicate', [Api\Vendor\VendorProductController::class, 'duplicate']);
-            Route::post('{id}/bulk-price', [Api\Vendor\VendorProductController::class, 'bulkPriceUpdate']);
+            Route::get('{product:uuid}', [Api\Vendor\VendorProductController::class, 'show']);
+            Route::put('{product:uuid}', [Api\Vendor\VendorProductController::class, 'update']);
+            Route::delete('{product:uuid}', [Api\Vendor\VendorProductController::class, 'destroy']);
+            Route::put('{product:uuid}/inventory', [Api\Vendor\VendorProductController::class, 'updateInventory']);
+            Route::post('{product:uuid}/duplicate', [Api\Vendor\VendorProductController::class, 'duplicate']);
+            Route::post('{product:uuid}/bulk-price', [Api\Vendor\VendorProductController::class, 'bulkPriceUpdate']);
         });
 
         // Order Management
@@ -570,7 +571,7 @@ Route::fallback(function () {
         'success' => false,
         'message' => 'API endpoint not found',
         'errors' => [
-            'route' => 'The requested API endpoint does not exist'
-        ]
+            'route' => 'The requested API endpoint does not exist',
+        ],
     ], 404);
 });

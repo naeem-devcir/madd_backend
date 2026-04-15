@@ -11,10 +11,10 @@ return new class extends Migration
         Schema::create('webhook_endpoints', function (Blueprint $table) {
             $table->id();
             $table->uuid('uuid')->unique();
-            
+
             // FIX: Add proper foreign key
-            $table->foreignUuid('vendor_id')->nullable()->references('uuid')->on('vendors')->nullOnDelete();
-            
+            $table->foreignId('vendor_id')->nullable()->constrained('vendors')->nullOnDelete();
+
             $table->string('url', 500);
             $table->string('secret');
             $table->json('events');
@@ -25,7 +25,7 @@ return new class extends Migration
             $table->integer('failure_count')->default(0);
             $table->timestamps();
             $table->softDeletes();
-            
+
             $table->index('is_active');
         });
     }

@@ -4,8 +4,8 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\UserResource;
-use App\Models\User;
 use App\Models\Role;
+use App\Models\User;
 use App\Services\Auth\PermissionService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -53,11 +53,11 @@ class AdminUserController extends Controller
         }
 
         if ($request->has('search')) {
-            $query->where(function($q) use ($request) {
-                $q->where('email', 'like', '%' . $request->search . '%')
-                  ->orWhere('first_name', 'like', '%' . $request->search . '%')
-                  ->orWhere('last_name', 'like', '%' . $request->search . '%')
-                  ->orWhere('phone', 'like', '%' . $request->search . '%');
+            $query->where(function ($q) use ($request) {
+                $q->where('email', 'like', '%'.$request->search.'%')
+                    ->orWhere('first_name', 'like', '%'.$request->search.'%')
+                    ->orWhere('last_name', 'like', '%'.$request->search.'%')
+                    ->orWhere('phone', 'like', '%'.$request->search.'%');
             });
         }
 
@@ -99,7 +99,7 @@ class AdminUserController extends Controller
                 'current_page' => $users->currentPage(),
                 'last_page' => $users->lastPage(),
                 'total' => $users->total(),
-            ]
+            ],
         ]);
     }
 
@@ -135,7 +135,7 @@ class AdminUserController extends Controller
                 'statistics' => $stats,
                 'login_history' => $loginHistory,
                 'permissions' => $user->getPermissionArray(),
-            ]
+            ],
         ]);
     }
 
@@ -195,7 +195,7 @@ class AdminUserController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'User created successfully',
-                'data' => new UserResource($user->load('roles'))
+                'data' => new UserResource($user->load('roles')),
             ], 201);
 
         } catch (\Exception $e) {
@@ -204,7 +204,7 @@ class AdminUserController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create user',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -219,7 +219,7 @@ class AdminUserController extends Controller
         $validated = $request->validate([
             'first_name' => 'sometimes|string|max:100',
             'last_name' => 'sometimes|string|max:100',
-            'phone' => 'nullable|string|max:20|unique:users,phone,' . $user->id,
+            'phone' => 'nullable|string|max:20|unique:users,phone,'.$user->id,
             'country_code' => 'sometimes|string|size:2',
             'locale' => 'sometimes|string|size:2',
             'timezone' => 'sometimes|string',
@@ -242,7 +242,7 @@ class AdminUserController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'User updated successfully',
-                'data' => new UserResource($user->fresh())
+                'data' => new UserResource($user->fresh()),
             ]);
 
         } catch (\Exception $e) {
@@ -251,7 +251,7 @@ class AdminUserController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update user',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -274,7 +274,7 @@ class AdminUserController extends Controller
             'data' => [
                 'user_id' => $user->id,
                 'roles' => $user->getRoleNames(),
-            ]
+            ],
         ]);
     }
 
@@ -296,7 +296,7 @@ class AdminUserController extends Controller
             'data' => [
                 'user_id' => $user->id,
                 'roles' => $user->getRoleNames(),
-            ]
+            ],
         ]);
     }
 
@@ -318,7 +318,7 @@ class AdminUserController extends Controller
             'data' => [
                 'user_id' => $user->id,
                 'permissions' => $user->getPermissionArray(),
-            ]
+            ],
         ]);
     }
 
@@ -340,7 +340,7 @@ class AdminUserController extends Controller
             'data' => [
                 'user_id' => $user->id,
                 'permissions' => $user->getPermissionArray(),
-            ]
+            ],
         ]);
     }
 
@@ -358,7 +358,7 @@ class AdminUserController extends Controller
         if ($user->is_super_admin) {
             return response()->json([
                 'success' => false,
-                'message' => 'Cannot suspend super admin user'
+                'message' => 'Cannot suspend super admin user',
             ], 422);
         }
 
@@ -379,7 +379,7 @@ class AdminUserController extends Controller
             'data' => [
                 'user_id' => $user->id,
                 'status' => $user->status,
-            ]
+            ],
         ]);
     }
 
@@ -393,7 +393,7 @@ class AdminUserController extends Controller
         if ($user->status !== 'suspended') {
             return response()->json([
                 'success' => false,
-                'message' => 'User is not suspended'
+                'message' => 'User is not suspended',
             ], 422);
         }
 
@@ -406,7 +406,7 @@ class AdminUserController extends Controller
             'data' => [
                 'user_id' => $user->id,
                 'status' => $user->status,
-            ]
+            ],
         ]);
     }
 
@@ -424,7 +424,7 @@ class AdminUserController extends Controller
         if ($user->is_super_admin) {
             return response()->json([
                 'success' => false,
-                'message' => 'Cannot ban super admin user'
+                'message' => 'Cannot ban super admin user',
             ], 422);
         }
 
@@ -445,7 +445,7 @@ class AdminUserController extends Controller
             'data' => [
                 'user_id' => $user->id,
                 'status' => $user->status,
-            ]
+            ],
         ]);
     }
 
@@ -459,7 +459,7 @@ class AdminUserController extends Controller
         if ($user->is_super_admin) {
             return response()->json([
                 'success' => false,
-                'message' => 'Cannot delete super admin user'
+                'message' => 'Cannot delete super admin user',
             ], 422);
         }
 
@@ -467,7 +467,7 @@ class AdminUserController extends Controller
         if ($user->orders()->count() > 0) {
             return response()->json([
                 'success' => false,
-                'message' => 'Cannot delete user with existing orders. Anonymize instead.'
+                'message' => 'Cannot delete user with existing orders. Anonymize instead.',
             ], 422);
         }
 
@@ -476,7 +476,7 @@ class AdminUserController extends Controller
         try {
             // Anonymize user data for GDPR compliance
             $user->update([
-                'email' => 'deleted_' . $user->id . '@example.com',
+                'email' => 'deleted_'.$user->id.'@example.com',
                 'phone' => null,
                 'first_name' => 'Deleted',
                 'last_name' => 'User',
@@ -498,7 +498,7 @@ class AdminUserController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'User anonymized successfully'
+                'message' => 'User anonymized successfully',
             ]);
 
         } catch (\Exception $e) {
@@ -507,7 +507,7 @@ class AdminUserController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete user',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -519,23 +519,23 @@ class AdminUserController extends Controller
     {
         $adminUser = auth()->user();
 
-        if (!$adminUser->can_impersonate) {
+        if (! $adminUser->can_impersonate) {
             return response()->json([
                 'success' => false,
-                'message' => 'You do not have permission to impersonate users'
+                'message' => 'You do not have permission to impersonate users',
             ], 403);
         }
 
         $user = User::findOrFail($id);
 
-        if (!$user->can_be_impersonated) {
+        if (! $user->can_be_impersonated) {
             return response()->json([
                 'success' => false,
-                'message' => 'This user cannot be impersonated'
+                'message' => 'This user cannot be impersonated',
             ], 422);
         }
 
-        $token = $adminUser->createToken('impersonation_' . $user->id, ['impersonating', 'user_id:' . $user->id])->plainTextToken;
+        $token = $adminUser->createToken('impersonation_'.$user->id, ['impersonating', 'user_id:'.$user->id])->plainTextToken;
 
         return response()->json([
             'success' => true,
@@ -545,7 +545,7 @@ class AdminUserController extends Controller
                 'user_id' => $user->id,
                 'user_name' => $user->full_name,
                 'user_email' => $user->email,
-            ]
+            ],
         ]);
     }
 
@@ -555,17 +555,17 @@ class AdminUserController extends Controller
     public function stopImpersonating()
     {
         $user = auth()->user();
-        
+
         // Get original token
         $currentToken = $user->currentAccessToken();
-        
+
         if ($currentToken && str_contains($currentToken->name, 'impersonation')) {
             $currentToken->delete();
         }
 
         return response()->json([
             'success' => true,
-            'message' => 'Impersonation stopped'
+            'message' => 'Impersonation stopped',
         ]);
     }
 
@@ -610,7 +610,7 @@ class AdminUserController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $stats
+            'data' => $stats,
         ]);
     }
 
@@ -631,14 +631,14 @@ class AdminUserController extends Controller
 
         $users = $query->get();
 
-        $filename = 'users_export_' . date('Y-m-d_His') . '.csv';
+        $filename = 'users_export_'.date('Y-m-d_His').'.csv';
         $handle = fopen('php://temp', 'w');
 
         // Headers
         fputcsv($handle, [
-            'ID', 'Email', 'First Name', 'Last Name', 'Phone', 
-            'User Type', 'Status', 'KYC Status', 'Country', 
-            'Email Verified', 'Created At', 'Last Login', 'Roles'
+            'ID', 'Email', 'First Name', 'Last Name', 'Phone',
+            'User Type', 'Status', 'KYC Status', 'Country',
+            'Email Verified', 'Created At', 'Last Login', 'Roles',
         ]);
 
         // Data
@@ -671,7 +671,8 @@ class AdminUserController extends Controller
                 'content' => base64_encode($csvContent),
                 'mime_type' => 'text/csv',
                 'row_count' => $users->count(),
-            ]
+            ],
         ]);
     }
 }
+

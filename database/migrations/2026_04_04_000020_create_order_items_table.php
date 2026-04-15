@@ -11,13 +11,9 @@ return new class extends Migration
         Schema::create('order_items', function (Blueprint $table) {
             $table->id();
             $table->uuid('uuid')->unique();
-            $table->foreignUuid('order_id')->references('uuid')->on('orders')->cascadeOnDelete();
+            $table->foreignId('order_id')->constrained('orders')->cascadeOnDelete();
             $table->integer('magento_item_id')->nullable();
-            
-            // FIX: vendor_products uses UUID as primary key
-            $table->uuid('vendor_product_id')->nullable();
-            $table->foreign('vendor_product_id')->references('id')->on('vendor_products')->nullOnDelete();
-            
+            $table->foreignId('vendor_product_id')->nullable()->constrained('vendor_products')->nullOnDelete();
             $table->integer('magento_product_id')->index();
             $table->string('magento_sku');
             $table->string('vendor_sku', 100)->nullable();
@@ -36,7 +32,7 @@ return new class extends Migration
             $table->decimal('row_total', 12, 4);
             $table->timestamps();
             $table->softDeletes();
-            
+
             $table->index('order_id');
             $table->index('vendor_product_id');
         });

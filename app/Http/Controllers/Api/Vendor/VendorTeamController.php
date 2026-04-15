@@ -32,3 +32,4 @@ class VendorTeamController extends PlaceholderApiController
         return $this->notImplemented('Vendor invitation resend', ['invitation_id' => $invitationId]);
     }
 }
+

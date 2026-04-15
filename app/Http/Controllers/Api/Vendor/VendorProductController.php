@@ -6,9 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\Vendor\CreateProductRequest;
 use App\Http\Requests\Api\Vendor\UpdateProductRequest;
 use App\Http\Resources\ProductResource;
-use App\Models\Product\VendorProduct;
+use App\Models\Inventory\InventoryLog;
 use App\Models\Product\ProductDraft;
 use App\Models\Product\ProductSharing;
+use App\Models\Product\VendorProduct;
 use App\Models\Vendor\VendorStore;
 use App\Services\Product\ProductService;
 use App\Services\Product\ProductSyncService;
@@ -18,6 +19,7 @@ use Illuminate\Support\Facades\DB;
 class VendorProductController extends Controller
 {
     protected $productService;
+
     protected $productSyncService;
 
     public function __construct(
@@ -40,11 +42,11 @@ class VendorProductController extends Controller
 
         // Apply filters
         if ($request->has('store_id')) {
-            $store = VendorStore::where('id', $request->store_id)
+            $store = VendorStore::where('uuid', $request->store_id)
                 ->where('vendor_id', $vendor->getKey())
                 ->firstOrFail();
 
-            $query->where('vendor_store_id', $store->uuid);
+            $query->where('vendor_store_id', $store->id);
         }
 
         if ($request->has('status')) {
@@ -52,9 +54,9 @@ class VendorProductController extends Controller
         }
 
         if ($request->has('search')) {
-            $query->where(function($q) use ($request) {
-                $q->where('name', 'like', '%' . $request->search . '%')
-                  ->orWhere('sku', 'like', '%' . $request->search . '%');
+            $query->where(function ($q) use ($request) {
+                $q->where('name', 'like', '%'.$request->search.'%')
+                    ->orWhere('sku', 'like', '%'.$request->search.'%');
             });
         }
 
@@ -79,7 +81,7 @@ class VendorProductController extends Controller
                 'total_count' => VendorProduct::where('vendor_id', $vendor->getKey())->count(),
                 'active_count' => VendorProduct::where('vendor_id', $vendor->getKey())->where('status', 'active')->count(),
                 'inactive_count' => VendorProduct::where('vendor_id', $vendor->getKey())->where('status', 'inactive')->count(),
-            ]
+            ],
         ]);
     }
 
@@ -91,17 +93,17 @@ class VendorProductController extends Controller
         $vendor = $request->user()->vendor;
 
         // Check plan limits
-        if (!$vendor->canAddProduct()) {
+        if (! $vendor->canAddProduct()) {
             return response()->json([
                 'success' => false,
-                'message' => 'Product limit reached for your plan. Maximum ' . $vendor->plan->max_products . ' products allowed.',
+                'message' => 'Product limit reached for your plan. Maximum '.$vendor->plan->max_products.' products allowed.',
                 'limit' => $vendor->plan->max_products,
                 'current' => VendorProduct::where('vendor_id', $vendor->getKey())->count(),
             ], 403);
         }
 
         // Verify store belongs to vendor
-        $store = VendorStore::where('id', $request->vendor_store_id)
+        $store = VendorStore::where('uuid', $request->vendor_store_id)
             ->where('vendor_id', $vendor->getKey())
             ->firstOrFail();
 
@@ -111,7 +113,7 @@ class VendorProductController extends Controller
             // Create product draft
             $draft = ProductDraft::create([
                 'vendor_id' => $vendor->getKey(),
-                'vendor_store_id' => $store->uuid,
+                'vendor_store_id' => $store->id,
                 'sku' => $request->sku,
                 'name' => $request->name,
                 'description' => $request->description,
@@ -144,18 +146,17 @@ class VendorProductController extends Controller
                 'data' => [
                     'draft_id' => $draft->id,
                     'status' => $draft->status,
-                    'requires_approval' => !$draft->auto_approve,
+                    'requires_approval' => ! $draft->auto_approve,
                     'estimated_approval_time' => $draft->auto_approve ? null : '24-48 hours',
-                ]
+                ],
             ], 201);
-
         } catch (\Exception $e) {
             DB::rollBack();
 
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create product',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -163,20 +164,16 @@ class VendorProductController extends Controller
     /**
      * Get a specific product
      */
-    public function show(Request $request, $id)
+    public function show(Request $request, VendorProduct $product)
     {
-        $vendor = $request->user()->vendor;
-
-        $product = VendorProduct::where('vendor_id', $vendor->getKey())
-            ->with(['store', 'draft', 'reviews', 'sharedToStores'])
-            ->findOrFail($id);
+        $product = $this->ownedProduct($request, $product)->load(['store', 'draft', 'reviews', 'sharedToStores']);
 
         // Get sales statistics
         $salesStats = [
             'total_sold' => $product->orderItems()->sum('qty_ordered'),
             'total_revenue' => $product->orderItems()->sum('row_total'),
             'last_30_days' => $product->orderItems()
-                ->whereHas('order', function($q) {
+                ->whereHas('order', function ($q) {
                     $q->where('created_at', '>=', now()->subDays(30));
                 })
                 ->sum('qty_ordered'),
@@ -192,19 +189,17 @@ class VendorProductController extends Controller
                     'total_reviews' => $product->getTotalReviews(),
                     'rating_distribution' => $this->getRatingDistribution($product),
                 ],
-            ]
+            ],
         ]);
     }
 
     /**
      * Update a product
      */
-    public function update(UpdateProductRequest $request, $id)
+    public function update(UpdateProductRequest $request, VendorProduct $product)
     {
         $vendor = $request->user()->vendor;
-
-        $product = VendorProduct::where('vendor_id', $vendor->getKey())
-            ->findOrFail($id);
+        $product = $this->ownedProduct($request, $product);
 
         DB::beginTransaction();
 
@@ -247,16 +242,15 @@ class VendorProductController extends Controller
                     'draft_id' => $draft->id,
                     'status' => 'pending_review',
                     'estimated_time' => '24-48 hours',
-                ]
+                ],
             ]);
-
         } catch (\Exception $e) {
             DB::rollBack();
 
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update product',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -264,16 +258,13 @@ class VendorProductController extends Controller
     /**
      * Delete a product (soft delete)
      */
-    public function destroy(Request $request, $id)
+    public function destroy(Request $request, VendorProduct $product)
     {
-        $vendor = $request->user()->vendor;
-
-        $product = VendorProduct::where('vendor_id', $vendor->getKey())
-            ->findOrFail($id);
+        $product = $this->ownedProduct($request, $product);
 
         // Check if product has pending orders
         $hasPendingOrders = $product->orderItems()
-            ->whereHas('order', function($q) {
+            ->whereHas('order', function ($q) {
                 $q->whereNotIn('status', ['delivered', 'cancelled', 'refunded']);
             })
             ->exists();
@@ -293,14 +284,13 @@ class VendorProductController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Product deleted successfully'
+                'message' => 'Product deleted successfully',
             ]);
-
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete product',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -308,7 +298,53 @@ class VendorProductController extends Controller
     /**
      * Update product inventory
      */
-    public function updateInventory(Request $request, $id)
+    // public function updateInventory(Request $request, $id)
+    // {
+    //     $request->validate([
+    //         'quantity' => 'required|integer|min:0',
+    //         'reason' => 'nullable|string|max:255',
+    //     ]);
+
+    //     $vendor = $request->user()->vendor;
+
+    //     $product = VendorProduct::where('vendor_id', $vendor->getKey())
+    //         ->findOrFail($id);
+
+    //     try {
+    //         // Sync inventory to Magento
+    //         $this->productSyncService->updateInventory($product, $request->quantity);
+
+    //         // Log inventory change
+    //         \App\Models\Inventory\InventoryLog::create([
+    //             'vendor_product_id' => $product->id,
+    //             'vendor_id' => $vendor->id,
+    //             'previous_quantity' => $product->quantity ?? 0,
+    //             'new_quantity' => $request->quantity,
+    //             'change' => $request->quantity - ($product->quantity ?? 0),
+    //             'reason' => $request->reason ?? 'Manual update',
+    //             'changed_by' => $request->user()->id,
+    //         ]);
+
+    //         return response()->json([
+    //             'success' => true,
+    //             'message' => 'Inventory updated successfully',
+    //             'data' => [
+    //                 'product_id' => $product->id,
+    //                 'sku' => $product->sku,
+    //                 'quantity' => $request->quantity,
+    //             ]
+    //         ]);
+
+    //     } catch (\Exception $e) {
+    //         return response()->json([
+    //             'success' => false,
+    //             'message' => 'Failed to update inventory',
+    //             'error' => $e->getMessage()
+    //         ], 500);
+    //     }
+    // }
+
+    public function updateInventory(Request $request, VendorProduct $product)
     {
         $request->validate([
             'quantity' => 'required|integer|min:0',
@@ -316,24 +352,37 @@ class VendorProductController extends Controller
         ]);
 
         $vendor = $request->user()->vendor;
+        $product = $this->ownedProduct($request, $product);
 
-        $product = VendorProduct::where('vendor_id', $vendor->getKey())
-            ->findOrFail($id);
+        $previousQuantity = $product->quantity ?? 0;
 
         try {
             // Sync inventory to Magento
             $this->productSyncService->updateInventory($product, $request->quantity);
 
-            // Log inventory change
-            \App\Models\Inventory\InventoryLog::create([
-                'vendor_product_id' => $product->id,
-                'vendor_id' => $vendor->id,
-                'previous_quantity' => $product->quantity ?? 0,
-                'new_quantity' => $request->quantity,
-                'change' => $request->quantity - ($product->quantity ?? 0),
-                'reason' => $request->reason ?? 'Manual update',
-                'changed_by' => $request->user()->id,
+            // Update local quantity
+            $product->update([
+                'quantity' => $request->quantity,
+                'metadata' => array_merge($product->metadata ?? [], [
+                    'last_inventory_update' => now()->toIso8601String(),
+                    'last_inventory_update_by' => $request->user()->id,
+                ]),
             ]);
+
+            // Log inventory change
+            InventoryLog::log(
+                vendorProductId: $product->id,
+                vendorId: $vendor->id,
+                previousQuantity: $previousQuantity,
+                newQuantity: $request->quantity,
+                reason: $request->reason ?? 'Manual update',
+                changeType: 'manual',
+                changedBy: $request->user()->id,
+                metadata: [
+                    'ip_address' => $request->ip(),
+                    'user_agent' => $request->userAgent(),
+                ]
+            );
 
             return response()->json([
                 'success' => true,
@@ -341,15 +390,16 @@ class VendorProductController extends Controller
                 'data' => [
                     'product_id' => $product->id,
                     'sku' => $product->sku,
-                    'quantity' => $request->quantity,
-                ]
+                    'previous_quantity' => $previousQuantity,
+                    'new_quantity' => $request->quantity,
+                    'change' => $request->quantity - $previousQuantity,
+                ],
             ]);
-
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update inventory',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -365,7 +415,7 @@ class VendorProductController extends Controller
             ->whereIn('status', ['pending', 'needs_modification', 'draft'])
             ->with(['product', 'reviewedBy', 'store'])
             ->orderBy('created_at', 'desc')
-            ->paginate($request->get('per_page', 20));
+            ->paginate($request->input('per_page', 20));
 
         return response()->json([
             'success' => true,
@@ -373,22 +423,20 @@ class VendorProductController extends Controller
             'meta' => [
                 'pending_count' => ProductDraft::where('vendor_id', $vendor->getKey())->where('status', 'pending')->count(),
                 'needs_modification_count' => ProductDraft::where('vendor_id', $vendor->getKey())->where('status', 'needs_modification')->count(),
-            ]
+            ],
         ]);
     }
 
     /**
      * Duplicate a product
      */
-    public function duplicate(Request $request, $id)
+    public function duplicate(Request $request, VendorProduct $product)
     {
         $vendor = $request->user()->vendor;
-
-        $originalProduct = VendorProduct::where('vendor_id', $vendor->getKey())
-            ->findOrFail($id);
+        $originalProduct = $this->ownedProduct($request, $product);
 
         // Check plan limits
-        if (!$vendor->canAddProduct()) {
+        if (! $vendor->canAddProduct()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Product limit reached for your plan',
@@ -399,10 +447,10 @@ class VendorProductController extends Controller
 
         try {
             // Generate new SKU
-            $newSku = $originalProduct->sku . '-copy';
+            $newSku = $originalProduct->sku.'-copy';
             $counter = 1;
             while (VendorProduct::where('vendor_id', $vendor->getKey())->where('sku', $newSku)->exists()) {
-                $newSku = $originalProduct->sku . '-copy-' . $counter;
+                $newSku = $originalProduct->sku.'-copy-'.$counter;
                 $counter++;
             }
 
@@ -411,7 +459,7 @@ class VendorProductController extends Controller
                 'vendor_id' => $vendor->getKey(),
                 'vendor_store_id' => $originalProduct->vendor_store_id,
                 'sku' => $newSku,
-                'name' => $originalProduct->name . ' (Copy)',
+                'name' => $originalProduct->name.' (Copy)',
                 'description' => $originalProduct->description,
                 'price' => $originalProduct->price,
                 'quantity' => 0,
@@ -429,16 +477,15 @@ class VendorProductController extends Controller
                     'draft_id' => $draft->id,
                     'name' => $draft->name,
                     'sku' => $draft->sku,
-                ]
+                ],
             ], 201);
-
         } catch (\Exception $e) {
             DB::rollBack();
 
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to duplicate product',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -446,27 +493,24 @@ class VendorProductController extends Controller
     /**
      * Share product with another store
      */
-    public function share(Request $request, $id)
+    public function share(Request $request, VendorProduct $product)
     {
         $request->validate([
-            'target_store_id' => 'required|exists:vendor_stores,id',
+            'target_store_id' => 'required|exists:vendor_stores,uuid',
             'commission_percentage' => 'nullable|numeric|min:0|max:100',
             'markup_percentage' => 'nullable|numeric|min:0|max:100',
         ]);
 
-        $vendor = $request->user()->vendor;
-
-        $product = VendorProduct::where('vendor_id', $vendor->getKey())
-            ->findOrFail($id);
+        $product = $this->ownedProduct($request, $product);
 
         // Verify target store exists and is active
-        $targetStore = VendorStore::where('id', $request->target_store_id)
+        $targetStore = VendorStore::where('uuid', $request->target_store_id)
             ->where('status', 'active')
             ->firstOrFail();
 
         // Check if already shared
         $existingShare = ProductSharing::where('source_product_id', $product->id)
-            ->where('target_store_id', $targetStore->uuid)
+            ->where('target_store_id', $targetStore->id)
             ->first();
 
         if ($existingShare) {
@@ -478,7 +522,7 @@ class VendorProductController extends Controller
 
         $share = ProductSharing::create([
             'source_product_id' => $product->id,
-            'target_store_id' => $targetStore->uuid,
+            'target_store_id' => $targetStore->id,
             'commission_percentage' => $request->commission_percentage,
             'markup_percentage' => $request->markup_percentage,
             'status' => 'pending',
@@ -487,7 +531,7 @@ class VendorProductController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Product share request sent',
-            'data' => $share
+            'data' => $share,
         ]);
     }
 
@@ -497,10 +541,10 @@ class VendorProductController extends Controller
     private function getRatingDistribution($product)
     {
         $distribution = [1 => 0, 2 => 0, 3 => 0, 4 => 0, 5 => 0];
-        
+
         $ratings = $product->reviews()
             ->where('status', 'approved')
-            ->select('rating', \DB::raw('count(*) as count'))
+            ->select('rating', DB::raw('count(*) as count'))
             ->groupBy('rating')
             ->get();
 
@@ -514,12 +558,21 @@ class VendorProductController extends Controller
     /**
      * Placeholder until bulk pricing workflow is implemented.
      */
-    public function bulkPriceUpdate(Request $request, $id)
+    public function bulkPriceUpdate(Request $request, VendorProduct $product)
     {
+        $product = $this->ownedProduct($request, $product);
+
         return response()->json([
             'success' => false,
             'message' => 'Bulk price update is not implemented yet.',
-            'product_id' => $id,
+            'product_id' => $product->uuid,
         ], 501);
+    }
+
+    private function ownedProduct(Request $request, VendorProduct $product): VendorProduct
+    {
+        abort_unless($product->vendor_id === $request->user()->vendor->id, 404);
+
+        return $product;
     }
 }

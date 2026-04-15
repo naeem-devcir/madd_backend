@@ -11,13 +11,9 @@ return new class extends Migration
         Schema::create('return_items', function (Blueprint $table) {
             $table->id();
             $table->uuid('uuid')->unique();
-            
-            // foreignUuid: FK references uuid
-            $table->foreignUuid('return_id')->references('uuid')->on('returns')->cascadeOnDelete();
-            $table->foreignUuid('order_item_id')->references('uuid')->on('order_items')->cascadeOnDelete();
-            $table->uuid('vendor_product_id')->nullable();
-            $table->foreign('vendor_product_id')->references('id')->on('vendor_products')->nullOnDelete();
-            
+            $table->foreignId('return_id')->constrained('returns')->cascadeOnDelete();
+            $table->foreignId('order_item_id')->constrained('order_items')->cascadeOnDelete();
+            $table->foreignId('vendor_product_id')->nullable()->constrained('vendor_products')->nullOnDelete();
             $table->integer('quantity');
             $table->decimal('refund_amount', 12, 4)->nullable();
             $table->decimal('restocking_fee', 12, 4)->default(0);
@@ -29,12 +25,12 @@ return new class extends Migration
             $table->json('customer_images')->nullable();
             $table->json('inspection_images')->nullable();
             $table->enum('resolution', ['refund', 'exchange', 'store_credit', 'repair', 'replacement', 'none'])->nullable();
-            $table->uuid('exchange_product_id')->nullable();
+            $table->foreignId('exchange_product_id')->nullable()->constrained('vendor_products')->nullOnDelete();
             $table->string('exchange_sku', 255)->nullable();
             $table->enum('disposition', ['restock', 'refurbish', 'donate', 'recycle', 'destroy'])->nullable();
             $table->timestamps();
             $table->softDeletes();
-            
+
             $table->index('inspection_status');
         });
     }

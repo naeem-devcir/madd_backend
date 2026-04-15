@@ -11,12 +11,12 @@ return new class extends Migration
         Schema::create('social_accounts', function (Blueprint $table) {
             $table->id();
             $table->uuid('uuid')->unique();
-            
+
             // Use foreignId which matches users.id (BIGINT)
-            $table->foreignUuid('user_id')
-                ->references('uuid')->on('users')
+            $table->foreignId('user_id')
+                ->constrained('users')
                 ->cascadeOnDelete();
-            
+
             $table->string('provider', 50);
             $table->string('provider_id', 255);
             $table->string('provider_email', 190)->nullable();
@@ -25,7 +25,7 @@ return new class extends Migration
             $table->timestamp('expires_at')->nullable();
             $table->timestamps();
             $table->softDeletes();
-            
+
             $table->unique(['provider', 'provider_id']);
             $table->index('user_id');
             $table->index('provider');

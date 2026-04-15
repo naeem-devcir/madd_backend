@@ -11,7 +11,7 @@ return new class extends Migration
         Schema::create('payment_transactions', function (Blueprint $table) {
             $table->id();
             $table->uuid('uuid')->unique();
-            $table->foreignUuid('order_id')->references('uuid')->on('orders')->cascadeOnDelete();
+            $table->foreignId('order_id')->constrained('orders')->cascadeOnDelete();
             $table->string('gateway', 50);
             $table->string('gateway_transaction_id');
             $table->string('parent_transaction_id')->nullable();
@@ -31,7 +31,6 @@ return new class extends Migration
             $table->timestamp('captured_at')->nullable();
             $table->timestamp('refunded_at')->nullable();
             $table->timestamps();
-            
             $table->unique(['gateway', 'gateway_transaction_id']);
             $table->index('order_id');
             $table->index('status');

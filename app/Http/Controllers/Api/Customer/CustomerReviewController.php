@@ -6,9 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\ReviewResource;
 use App\Models\Order\Order;
 use App\Models\Order\OrderItem;
+use App\Models\Product\VendorProduct;
 use App\Models\Review\Review;
-use App\Models\Review\ReviewHelpfulVote;
 use App\Models\Review\ReviewFlag;
+use App\Models\Review\ReviewHelpfulVote;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -21,7 +22,7 @@ class CustomerReviewController extends Controller
     {
         $customer = auth()->user();
 
-        $reviews = Review::where('customer_id', $customer->uuid)
+        $reviews = Review::where('customer_id', $customer->id)
             ->with(['product', 'vendor', 'store'])
             ->orderBy('created_at', 'desc')
             ->paginate($request->get('per_page', 20));
@@ -33,7 +34,7 @@ class CustomerReviewController extends Controller
                 'current_page' => $reviews->currentPage(),
                 'last_page' => $reviews->lastPage(),
                 'total' => $reviews->total(),
-            ]
+            ],
         ]);
     }
 
@@ -55,33 +56,33 @@ class CustomerReviewController extends Controller
         $customer = auth()->user();
 
         // Verify customer purchased this product
-        $product = \App\Models\Product\VendorProduct::findOrFail($request->product_id);
+        $product = VendorProduct::findOrFail($request->product_id);
         $order = Order::findOrFail($request->order_id);
 
-        $hasPurchased = OrderItem::where('order_id', $order->uuid)
-            ->whereHas('order', function($query) use ($customer) {
-                $query->where('customer_id', $customer->uuid)
+        $hasPurchased = OrderItem::where('order_id', $order->id)
+            ->whereHas('order', function ($query) use ($customer) {
+                $query->where('customer_id', $customer->id)
                     ->where('status', 'delivered');
             })
             ->where('vendor_product_id', $request->product_id)
             ->exists();
 
-        if (!$hasPurchased) {
+        if (! $hasPurchased) {
             return response()->json([
                 'success' => false,
-                'message' => 'You can only review products you have purchased and received'
+                'message' => 'You can only review products you have purchased and received',
             ], 403);
         }
 
         // Check if already reviewed
-        $existingReview = Review::where('customer_id', $customer->uuid)
+        $existingReview = Review::where('customer_id', $customer->id)
             ->where('vendor_product_id', $request->product_id)
             ->exists();
 
         if ($existingReview) {
             return response()->json([
                 'success' => false,
-                'message' => 'You have already reviewed this product'
+                'message' => 'You have already reviewed this product',
             ], 422);
         }
 
@@ -89,7 +90,7 @@ class CustomerReviewController extends Controller
 
         try {
             $review = Review::create([
-                'customer_id' => $customer->uuid,
+                'customer_id' => $customer->id,
                 'vendor_product_id' => $request->product_id,
                 'vendor_id' => $product->vendor_id,
                 'vendor_store_id' => $product->vendor_store_id,
@@ -107,7 +108,7 @@ class CustomerReviewController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Review submitted successfully and pending moderation',
-                'data' => new ReviewResource($review)
+                'data' => new ReviewResource($review),
             ], 201);
 
         } catch (\Exception $e) {
@@ -116,7 +117,7 @@ class CustomerReviewController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to submit review',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -128,7 +129,7 @@ class CustomerReviewController extends Controller
     {
         $customer = auth()->user();
 
-        $review = Review::where('customer_id', $customer->uuid)
+        $review = Review::where('customer_id', $customer->id)
             ->where('status', 'pending')
             ->findOrFail($id);
 
@@ -149,7 +150,7 @@ class CustomerReviewController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Review updated successfully',
-                'data' => new ReviewResource($review)
+                'data' => new ReviewResource($review),
             ]);
 
         } catch (\Exception $e) {
@@ -158,7 +159,7 @@ class CustomerReviewController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update review',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -170,7 +171,7 @@ class CustomerReviewController extends Controller
     {
         $customer = auth()->user();
 
-        $review = Review::where('customer_id', $customer->uuid)
+        $review = Review::where('customer_id', $customer->id)
             ->whereIn('status', ['pending', 'rejected'])
             ->findOrFail($id);
 
@@ -183,7 +184,7 @@ class CustomerReviewController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Review deleted successfully'
+                'message' => 'Review deleted successfully',
             ]);
 
         } catch (\Exception $e) {
@@ -192,7 +193,7 @@ class CustomerReviewController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete review',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -214,7 +215,7 @@ class CustomerReviewController extends Controller
         if ($existingVote) {
             return response()->json([
                 'success' => false,
-                'message' => 'You have already voted on this review'
+                'message' => 'You have already voted on this review',
             ], 422);
         }
 
@@ -236,7 +237,7 @@ class CustomerReviewController extends Controller
                 'message' => 'Review marked as helpful',
                 'data' => [
                     'helpful_count' => $review->helpful_count,
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
@@ -245,7 +246,7 @@ class CustomerReviewController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to mark review',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -271,7 +272,7 @@ class CustomerReviewController extends Controller
         if ($existingFlag) {
             return response()->json([
                 'success' => false,
-                'message' => 'You have already flagged this review'
+                'message' => 'You have already flagged this review',
             ], 422);
         }
 
@@ -297,7 +298,7 @@ class CustomerReviewController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Review has been reported to moderators'
+                'message' => 'Review has been reported to moderators',
             ]);
 
         } catch (\Exception $e) {
@@ -306,8 +307,9 @@ class CustomerReviewController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to flag review',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
 }
+

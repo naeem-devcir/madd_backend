@@ -37,3 +37,4 @@ class AdminCurrencyController extends PlaceholderApiController
         return $this->notImplemented('Admin exchange rate update', ['code' => $code]);
     }
 }
+

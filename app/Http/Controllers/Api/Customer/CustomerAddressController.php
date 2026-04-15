@@ -37,3 +37,4 @@ class CustomerAddressController extends PlaceholderApiController
         return $this->notImplemented('Customer default address selection', ['id' => $id]);
     }
 }
+

@@ -4,9 +4,9 @@ namespace App\Http\Controllers\Api\Vendor;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\SettlementResource;
+use App\Models\Financial\Payout;
 use App\Models\Financial\Settlement;
 use App\Models\Financial\Transaction;
-use App\Models\Financial\Payout;
 use App\Models\Vendor\VendorBankAccount;
 use App\Services\Vendor\SettlementService;
 use Illuminate\Http\Request;
@@ -53,7 +53,7 @@ class VendorSettlementController extends Controller
                 'current_page' => $settlements->currentPage(),
                 'last_page' => $settlements->lastPage(),
                 'total' => $settlements->total(),
-            ]
+            ],
         ]);
     }
 
@@ -83,7 +83,7 @@ class VendorSettlementController extends Controller
                 'breakdown' => $breakdown,
                 'transactions' => $settlement->transactions,
                 'orders_included' => $settlement->orders()->count(),
-            ]
+            ],
         ]);
     }
 
@@ -118,7 +118,7 @@ class VendorSettlementController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $summary
+            'data' => $summary,
         ]);
     }
 
@@ -159,7 +159,7 @@ class VendorSettlementController extends Controller
                 'current_page' => $transactions->currentPage(),
                 'last_page' => $transactions->lastPage(),
                 'total' => $transactions->total(),
-            ]
+            ],
         ]);
     }
 
@@ -169,7 +169,7 @@ class VendorSettlementController extends Controller
     public function requestPayout(Request $request)
     {
         $request->validate([
-            'amount' => 'required|numeric|min:50|max:' . $request->user()->vendor->current_balance,
+            'amount' => 'required|numeric|min:50|max:'.$request->user()->vendor->current_balance,
             'bank_account_id' => 'required_if:payout_method,bank|exists:vendor_bank_accounts,id',
             'payout_method' => 'required|in:bank,paypal,stripe',
         ]);
@@ -201,7 +201,7 @@ class VendorSettlementController extends Controller
                 ->where('vendor_id', $vendor->getKey())
                 ->first();
 
-            if (!$bankAccount || !$bankAccount->is_verified) {
+            if (! $bankAccount || ! $bankAccount->is_verified) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Bank account must be verified before requesting payout',
@@ -221,14 +221,14 @@ class VendorSettlementController extends Controller
                     'status' => $payout->status,
                     'estimated_date' => now()->addDays(3)->toDateString(),
                     'processing_time' => '2-3 business days',
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to process payout request',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -260,7 +260,7 @@ class VendorSettlementController extends Controller
                 'current_page' => $payouts->currentPage(),
                 'last_page' => $payouts->lastPage(),
                 'total' => $payouts->total(),
-            ]
+            ],
         ]);
     }
 
@@ -277,7 +277,7 @@ class VendorSettlementController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $payout
+            'data' => $payout,
         ]);
     }
 
@@ -321,7 +321,7 @@ class VendorSettlementController extends Controller
                 'data' => [
                     'refunded_amount' => $payout->amount,
                     'new_balance' => $vendor->current_balance,
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
@@ -330,7 +330,7 @@ class VendorSettlementController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to cancel payout',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -346,7 +346,7 @@ class VendorSettlementController extends Controller
             ->where('status', 'paid')
             ->findOrFail($id);
 
-        if (!$settlement->statement_pdf_path) {
+        if (! $settlement->statement_pdf_path) {
             return response()->json([
                 'success' => false,
                 'message' => 'Statement not available for this settlement',
@@ -360,7 +360,7 @@ class VendorSettlementController extends Controller
                 'download_url' => $settlement->statement_pdf_path,
                 'settlement_number' => $settlement->settlement_number,
                 'expires_in' => 900, // 15 minutes
-            ]
+            ],
         ]);
     }
 
@@ -400,3 +400,4 @@ class VendorSettlementController extends Controller
         ], 501);
     }
 }
+

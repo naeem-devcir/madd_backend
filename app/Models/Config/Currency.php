@@ -10,9 +10,11 @@ class Currency extends Model
     use HasFactory;
 
     protected $table = 'currencies';
-    
+
     protected $primaryKey = 'code';
+
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [
@@ -31,29 +33,30 @@ class Currency extends Model
     ];
 
     // ========== Scopes ==========
-    
+
     public function scopeActive($query)
     {
         return $query->where('is_active', true);
     }
-    
+
     // ========== Accessors ==========
-    
+
     public function getFormattedExchangeRateAttribute(): string
     {
-        return '1 ' . $this->code . ' = ' . $this->exchange_rate . ' EUR';
+        return '1 '.$this->code.' = '.$this->exchange_rate.' EUR';
     }
-    
+
     // ========== Methods ==========
-    
+
     public function format(float $amount): string
     {
-        return $this->symbol . ' ' . number_format($amount, $this->decimal_places);
+        return $this->symbol.' '.number_format($amount, $this->decimal_places);
     }
-    
+
     public function convertTo(float $amount, Currency $targetCurrency): float
     {
         $amountInBase = $amount / $this->exchange_rate;
+
         return $amountInBase * $targetCurrency->exchange_rate;
     }
 }

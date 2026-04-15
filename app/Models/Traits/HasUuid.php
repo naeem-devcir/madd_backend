@@ -24,7 +24,7 @@ trait HasUuid
     {
         return 'uuid';
     }
-    
+
     public function scopeByUuid($query, string $uuid)
     {
         return $query->where($this->getUuidColumn(), $uuid);

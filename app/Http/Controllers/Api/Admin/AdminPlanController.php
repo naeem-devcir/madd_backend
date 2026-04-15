@@ -37,3 +37,4 @@ class AdminPlanController extends PlaceholderApiController
         return $this->notImplemented('Admin default plan selection', ['id' => $id]);
     }
 }
+

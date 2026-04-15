@@ -56,3 +56,4 @@ class AdminSystemController extends PlaceholderApiController
         return $this->notImplemented('Admin maintenance toggle');
     }
 }
+

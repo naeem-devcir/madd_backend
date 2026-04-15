@@ -4,10 +4,9 @@ namespace App\Http\Controllers\Api\Vendor;
 
 use App\Http\Controllers\Controller;
 use App\Models\Order\Order;
-use App\Models\Product\VendorProduct;
-use App\Models\Financial\Transaction;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class VendorDashboardController extends Controller
 {
@@ -115,7 +114,7 @@ class VendorDashboardController extends Controller
                 'recent_orders' => $recentOrders,
                 'top_products' => $topProducts,
                 'store_performance' => $storePerformance,
-            ]
+            ],
         ]);
     }
 
@@ -124,10 +123,13 @@ class VendorDashboardController extends Controller
      */
     public function statistics(Request $request)
     {
+        // $period = $request->input('period', '30_days');
+        //     Log::info($period);
+        //     return;
         $vendor = $request->user()->vendor;
 
-        $period = $request->get('period', '30_days');
-        $days = match($period) {
+        $period = $request->input('period', '30_days');
+        $days = match ($period) {
             '7_days' => 7,
             '30_days' => 30,
             '90_days' => 90,
@@ -188,7 +190,7 @@ class VendorDashboardController extends Controller
                 'sales_by_status' => $salesByStatus,
                 'sales_by_country' => $salesByCountry,
                 'top_products' => $topProducts,
-            ]
+            ],
         ]);
     }
 
@@ -204,3 +206,4 @@ class VendorDashboardController extends Controller
         return round((($current - $previous) / $previous) * 100, 2);
     }
 }
+

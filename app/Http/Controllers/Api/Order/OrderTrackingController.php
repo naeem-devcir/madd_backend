@@ -3,9 +3,10 @@
 namespace App\Http\Controllers\Api\Order;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\Notification\SendOrderShippedNotification;
+use App\Models\Config\Courier;
 use App\Models\Order\Order;
 use App\Models\Order\OrderTracking;
-use App\Models\Config\Courier;
 use App\Services\Shipping\TrackingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -27,10 +28,10 @@ class OrderTrackingController extends Controller
     {
         $order = Order::with(['tracking', 'tracking.carrier'])->findOrFail($orderId);
 
-        if (!$order->tracking) {
+        if (! $order->tracking) {
             return response()->json([
                 'success' => false,
-                'message' => 'No tracking information available for this order'
+                'message' => 'No tracking information available for this order',
             ], 404);
         }
 
@@ -56,7 +57,7 @@ class OrderTrackingController extends Controller
                 'delivered_at' => $order->tracking->delivered_at?->toIso8601String(),
                 'last_update' => $order->tracking->last_update?->toIso8601String(),
                 'events' => $order->tracking->tracking_events ?? [],
-            ]
+            ],
         ]);
     }
 
@@ -74,7 +75,7 @@ class OrderTrackingController extends Controller
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
@@ -84,7 +85,7 @@ class OrderTrackingController extends Controller
         if ($order->tracking) {
             return response()->json([
                 'success' => false,
-                'message' => 'Tracking already exists for this order'
+                'message' => 'Tracking already exists for this order',
             ], 422);
         }
 
@@ -92,10 +93,10 @@ class OrderTrackingController extends Controller
 
         try {
             $carrier = Courier::find($request->carrier_id);
-            
+
             $tracking = OrderTracking::create([
-                'order_id' => $order->uuid,
-                'carrier_id' => $carrier->uuid,
+                'order_id' => $order->id,
+                'carrier_id' => $carrier->id,
                 'tracking_number' => $request->tracking_number,
                 'label_url' => $request->label_url,
                 'status' => 'pending',
@@ -103,12 +104,12 @@ class OrderTrackingController extends Controller
             ]);
 
             // Update order status
-            $order->updateStatus('shipped', 'Order has been shipped with tracking number: ' . $request->tracking_number, auth()->user());
+            $order->updateStatus('shipped', 'Order has been shipped with tracking number: '.$request->tracking_number, auth()->user());
 
             DB::commit();
 
             // Send notification to customer
-            \App\Jobs\Notification\SendOrderShippedNotification::dispatch($order);
+            SendOrderShippedNotification::dispatch($order);
 
             return response()->json([
                 'success' => true,
@@ -117,7 +118,7 @@ class OrderTrackingController extends Controller
                     'tracking_id' => $tracking->id,
                     'tracking_number' => $tracking->tracking_number,
                     'tracking_url' => $tracking->tracking_url,
-                ]
+                ],
             ], 201);
 
         } catch (\Exception $e) {
@@ -126,7 +127,7 @@ class OrderTrackingController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create tracking',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -145,16 +146,16 @@ class OrderTrackingController extends Controller
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
         $order = Order::findOrFail($orderId);
 
-        if (!$order->tracking) {
+        if (! $order->tracking) {
             return response()->json([
                 'success' => false,
-                'message' => 'No tracking found for this order'
+                'message' => 'No tracking found for this order',
             ], 404);
         }
 
@@ -162,7 +163,7 @@ class OrderTrackingController extends Controller
 
         try {
             $tracking = $order->tracking;
-            
+
             if ($request->has('tracking_number')) {
                 $tracking->tracking_number = $request->tracking_number;
                 if ($tracking->carrier) {
@@ -172,7 +173,7 @@ class OrderTrackingController extends Controller
 
             if ($request->has('status')) {
                 $tracking->status = $request->status;
-                
+
                 if ($request->status === 'delivered') {
                     $tracking->delivered_at = now();
                     $order->markAsDelivered();
@@ -195,7 +196,7 @@ class OrderTrackingController extends Controller
                     'tracking_number' => $tracking->tracking_number,
                     'status' => $tracking->status,
                     'estimated_delivery' => $tracking->estimated_delivery?->toDateString(),
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
@@ -204,7 +205,7 @@ class OrderTrackingController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update tracking',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -223,21 +224,21 @@ class OrderTrackingController extends Controller
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
         $order = Order::findOrFail($orderId);
 
-        if (!$order->tracking) {
+        if (! $order->tracking) {
             return response()->json([
                 'success' => false,
-                'message' => 'No tracking found for this order'
+                'message' => 'No tracking found for this order',
             ], 404);
         }
 
         $tracking = $order->tracking;
-        
+
         $events = $tracking->tracking_events ?? [];
         $events[] = [
             'status' => $request->status,
@@ -252,7 +253,7 @@ class OrderTrackingController extends Controller
         $tracking->save();
 
         // If delivered, update order
-        if ($request->status === 'delivered' && !$order->is_delivered) {
+        if ($request->status === 'delivered' && ! $order->is_delivered) {
             $order->markAsDelivered();
         }
 
@@ -262,7 +263,7 @@ class OrderTrackingController extends Controller
             'data' => [
                 'event' => $events[count($events) - 1],
                 'total_events' => count($events),
-            ]
+            ],
         ]);
     }
 
@@ -273,10 +274,10 @@ class OrderTrackingController extends Controller
     {
         $order = Order::with('tracking')->findOrFail($orderId);
 
-        if (!$order->tracking) {
+        if (! $order->tracking) {
             return response()->json([
                 'success' => false,
-                'message' => 'No tracking found for this order'
+                'message' => 'No tracking found for this order',
             ], 404);
         }
 
@@ -290,14 +291,14 @@ class OrderTrackingController extends Controller
                     'status' => $order->tracking->status,
                     'events' => $order->tracking->tracking_events,
                     'updated' => $updated,
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to refresh tracking',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -317,7 +318,7 @@ class OrderTrackingController extends Controller
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
@@ -330,23 +331,23 @@ class OrderTrackingController extends Controller
         try {
             foreach ($request->orders as $orderData) {
                 $order = Order::find($orderData['order_id']);
-                
-                if (!$order->tracking) {
+
+                if (! $order->tracking) {
                     $carrier = Courier::find($orderData['carrier_id']);
-                    
+
                     OrderTracking::create([
-                        'order_id' => $order->uuid,
-                        'carrier_id' => $carrier->uuid,
+                        'order_id' => $order->id,
+                        'carrier_id' => $carrier->id,
                         'tracking_number' => $orderData['tracking_number'],
                         'status' => 'pending',
                         'tracking_url' => $carrier->getTrackingUrl($orderData['tracking_number']),
                     ]);
-                    
+
                     $order->updateStatus('shipped', 'Bulk shipping update', auth()->user());
                     $successCount++;
-                    
+
                     // Send notification
-                    \App\Jobs\Notification\SendOrderShippedNotification::dispatch($order);
+                    SendOrderShippedNotification::dispatch($order);
                 } else {
                     $failureCount++;
                     $results[] = [
@@ -365,7 +366,7 @@ class OrderTrackingController extends Controller
                     'success_count' => $successCount,
                     'failure_count' => $failureCount,
                     'details' => $results,
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
@@ -374,7 +375,7 @@ class OrderTrackingController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create tracking',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -388,7 +389,7 @@ class OrderTrackingController extends Controller
 
         if ($request->has('carrier_id')) {
             $carrier = Courier::find($request->carrier_id);
-            $query->where('carrier_id', $carrier?->uuid);
+            $query->where('carrier_id', $carrier?->id);
         }
 
         $stats = [
@@ -405,7 +406,7 @@ class OrderTrackingController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $stats
+            'data' => $stats,
         ]);
     }
 
@@ -423,7 +424,7 @@ class OrderTrackingController extends Controller
             return 0;
         }
 
-        $onTime = $deliveredOrders->filter(function($tracking) {
+        $onTime = $deliveredOrders->filter(function ($tracking) {
             return $tracking->delivered_at <= $tracking->estimated_delivery->endOfDay();
         })->count();
 

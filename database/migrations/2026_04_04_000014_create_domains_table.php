@@ -11,10 +11,10 @@ return new class extends Migration
         Schema::create('domains', function (Blueprint $table) {
             $table->id();
             $table->uuid('uuid')->unique();
-            
+
             // foreignUuid: FK references uuid
-            $table->foreignUuid('vendor_store_id')->nullable()->references('uuid')->on('vendor_stores')->nullOnDelete();
-            
+            $table->foreignId('vendor_store_id')->nullable()->constrained('vendor_stores')->nullOnDelete();
+
             $table->string('domain', 253)->unique();
             $table->enum('type', ['madd_subdomain', 'vendor_custom', 'marketplace']);
             $table->boolean('dns_verified')->default(false);
@@ -32,7 +32,7 @@ return new class extends Migration
             $table->boolean('is_primary')->default(false);
             $table->timestamps();
             $table->softDeletes();
-            
+
             $table->index('domain');
         });
     }

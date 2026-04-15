@@ -2,18 +2,18 @@
 
 namespace App\Models;
 
-use DateTimeInterface;
-use Illuminate\Auth\MustVerifyEmail;
-use Illuminate\Contracts\Auth\MustVerifyEmail as MustVerifyEmailContract;
+use App\Models\Financial\Settlement;
+use App\Models\Financial\Transaction;
+use App\Models\Mlm\MlmAgent;
+use App\Models\Notification\Notification;
+use App\Models\Order\Order;
+use App\Models\Review\Review;
 use App\Models\Traits\HasUuid;
 use App\Models\Vendor\Vendor;
 use App\Models\Vendor\VendorUser;
-use App\Models\Mlm\MlmAgent;
-use App\Models\Order\Order;
-use App\Models\Review\Review;
-use App\Models\Notification\Notification;
-use App\Models\Financial\Transaction;
-use App\Models\Financial\Settlement;
+use DateTimeInterface;
+use Illuminate\Auth\MustVerifyEmail;
+use Illuminate\Contracts\Auth\MustVerifyEmail as MustVerifyEmailContract;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -21,15 +21,13 @@ use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 use Laravel\Sanctum\NewAccessToken;
 use Spatie\Permission\Traits\HasRoles;
-use Illuminate\Support\Str;
-
 
 class User extends Authenticatable implements MustVerifyEmailContract
 {
     use HasApiTokens {
         createToken as sanctumCreateToken;
     }
-    use HasFactory, MustVerifyEmail, Notifiable, SoftDeletes, HasRoles, HasUuid;
+    use HasFactory, HasRoles, HasUuid, MustVerifyEmail, Notifiable, SoftDeletes;
 
     protected $table = 'users';
 
@@ -87,32 +85,32 @@ class User extends Authenticatable implements MustVerifyEmailContract
 
     public function vendor()
     {
-        return $this->hasOne(Vendor::class, 'user_id', 'uuid');
+        return $this->hasOne(Vendor::class, 'user_id', 'id');
     }
 
     public function vendorUser()
     {
-        return $this->hasOne(VendorUser::class, 'user_id', 'uuid');
+        return $this->hasOne(VendorUser::class, 'user_id', 'id');
     }
 
     public function mlmAgent()
     {
-        return $this->hasOne(MlmAgent::class, 'user_id', 'uuid');
+        return $this->hasOne(MlmAgent::class, 'user_id', 'id');
     }
 
     public function socialAccounts()
     {
-        return $this->hasMany(SocialAccount::class, 'user_id', 'uuid');
+        return $this->hasMany(SocialAccount::class, 'user_id', 'id');
     }
 
     public function orders()
     {
-        return $this->hasMany(Order::class, 'customer_id', 'uuid');
+        return $this->hasMany(Order::class, 'customer_id', 'id');
     }
 
     public function reviews()
     {
-        return $this->hasMany(Review::class, 'customer_id', 'uuid');
+        return $this->hasMany(Review::class, 'customer_id', 'id');
     }
 
     public function notifications()
@@ -122,7 +120,7 @@ class User extends Authenticatable implements MustVerifyEmailContract
 
     public function approvedVendors()
     {
-        return $this->hasMany(Vendor::class, 'approved_by', 'uuid');
+        return $this->hasMany(Vendor::class, 'approved_by', 'id');
     }
 
     public function createdVendors()
@@ -137,12 +135,12 @@ class User extends Authenticatable implements MustVerifyEmailContract
 
     public function settlementsApproved()
     {
-        return $this->hasMany(Settlement::class, 'approved_by', 'uuid');
+        return $this->hasMany(Settlement::class, 'approved_by', 'id');
     }
 
     public function transactions()
     {
-        return $this->hasMany(Transaction::class, 'initiated_by', 'uuid');
+        return $this->hasMany(Transaction::class, 'initiated_by', 'id');
     }
 
     // ========== Scopes ==========
@@ -186,12 +184,12 @@ class User extends Authenticatable implements MustVerifyEmailContract
 
     public function getFullNameAttribute(): string
     {
-        return trim($this->first_name . ' ' . $this->last_name);
+        return trim($this->first_name.' '.$this->last_name);
     }
 
     public function getInitialsAttribute(): string
     {
-        return strtoupper(substr($this->first_name, 0, 1) . substr($this->last_name, 0, 1));
+        return strtoupper(substr($this->first_name, 0, 1).substr($this->last_name, 0, 1));
     }
 
     public function getIsAdminAttribute(): bool
@@ -226,12 +224,12 @@ class User extends Authenticatable implements MustVerifyEmailContract
 
     public function getIsEmailVerifiedAttribute(): bool
     {
-        return !is_null($this->email_verified_at);
+        return ! is_null($this->email_verified_at);
     }
 
     public function getIsPhoneVerifiedAttribute(): bool
     {
-        return !is_null($this->phone_verified_at);
+        return ! is_null($this->phone_verified_at);
     }
 
     public function getIsKycVerifiedAttribute(): bool
@@ -245,7 +243,7 @@ class User extends Authenticatable implements MustVerifyEmailContract
             return $value;
         }
 
-        return 'https://ui-avatars.com/api/?name=' . urlencode($this->full_name) . '&background=4F46E5&color=ffffff';
+        return 'https://ui-avatars.com/api/?name='.urlencode($this->full_name).'&background=4F46E5&color=ffffff';
     }
 
     // ========== Mutators ==========
@@ -283,12 +281,12 @@ class User extends Authenticatable implements MustVerifyEmailContract
 
     public function hasMfaEnabled(): bool
     {
-        return !is_null($this->two_factor_secret);
+        return ! is_null($this->two_factor_secret);
     }
 
     public function isEmailVerified(): bool
     {
-        return !is_null($this->email_verified_at);
+        return ! is_null($this->email_verified_at);
     }
 
     public function canImpersonate(): bool
@@ -298,7 +296,7 @@ class User extends Authenticatable implements MustVerifyEmailContract
 
     public function canBeImpersonated(): bool
     {
-        return !$this->is_super_admin;
+        return ! $this->is_super_admin;
     }
 
     public function generateTwoFactorSecret(): string
@@ -328,7 +326,7 @@ class User extends Authenticatable implements MustVerifyEmailContract
     {
         $codes = [];
         for ($i = 0; $i < 8; $i++) {
-            $codes[] = strtoupper(substr(md5(uniqid()), 0, 8)) . '-' . strtoupper(substr(md5(uniqid()), 0, 8));
+            $codes[] = strtoupper(substr(md5(uniqid()), 0, 8)).'-'.strtoupper(substr(md5(uniqid()), 0, 8));
         }
 
         $this->two_factor_recovery_codes = $codes;

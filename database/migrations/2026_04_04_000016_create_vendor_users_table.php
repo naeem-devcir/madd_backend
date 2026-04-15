@@ -11,12 +11,12 @@ return new class extends Migration
         Schema::create('vendor_users', function (Blueprint $table) {
             $table->id();
             $table->uuid('uuid')->unique();
-            
+
             // foreignUuid: FK references uuid
-            $table->foreignUuid('vendor_id')->references('uuid')->on('vendors')->cascadeOnDelete();
-            $table->foreignUuid('user_id')->references('uuid')->on('users')->cascadeOnDelete();
-            $table->foreignUuid('invited_by')->nullable()->references('uuid')->on('users')->nullOnDelete();
-            
+            $table->foreignId('vendor_id')->constrained('vendors')->cascadeOnDelete();
+            $table->foreignId('user_id')->constrained('users')->cascadeOnDelete();
+            $table->foreignId('invited_by')->nullable()->constrained('users')->nullOnDelete();
+
             $table->enum('role', ['admin', 'orders', 'products', 'marketing', 'seo']);
             $table->json('permissions')->nullable();
             $table->boolean('is_active')->default(true);
@@ -27,7 +27,7 @@ return new class extends Migration
             $table->json('notification_prefs')->nullable();
             $table->timestamps();
             $table->softDeletes();
-            
+
             $table->unique(['vendor_id', 'user_id']);
             $table->index('role');
         });

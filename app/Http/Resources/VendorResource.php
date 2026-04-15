@@ -46,7 +46,7 @@ class VendorResource extends JsonResource
                 'total_commission_paid' => $this->total_commission_paid,
                 'commission_rate' => $this->effective_commission_rate,
             ],
-            'plan' => $this->whenLoaded('plan', function() {
+            'plan' => $this->whenLoaded('plan', function () {
                 return [
                     'name' => $this->plan->name,
                     'max_products' => $this->plan->max_products,
@@ -57,8 +57,8 @@ class VendorResource extends JsonResource
                 ];
             }),
             'stores' => VendorStoreResource::collection($this->whenLoaded('stores')),
-            'bank_accounts' => $this->whenLoaded('bankAccounts', function() {
-                return $this->bankAccounts->map(function($account) {
+            'bank_accounts' => $this->whenLoaded('bankAccounts', function () {
+                return $this->bankAccounts->map(function ($account) {
                     return [
                         'id' => $account->id,
                         'account_type' => $account->account_type,

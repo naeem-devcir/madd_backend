@@ -2,8 +2,8 @@
 
 namespace App\Models\Config;
 
-use App\Models\Financial\Settlement;
 use App\Models\Financial\Invoice;
+use App\Models\Financial\Settlement;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -39,63 +39,63 @@ class MaddCompany extends Model
     ];
 
     // ========== Relationships ==========
-    
+
     public function country()
     {
         return $this->belongsTo(CountryConfig::class, 'country_code', 'code');
     }
-    
+
     public function settlements()
     {
         return $this->hasMany(Settlement::class, 'madd_company_id', 'id');
     }
-    
+
     public function invoices()
     {
         return $this->hasMany(Invoice::class, 'madd_company_id', 'id');
     }
-    
+
     // ========== Scopes ==========
-    
+
     public function scopeActive($query)
     {
         return $query->where('is_active', true);
     }
-    
+
     // ========== Accessors ==========
-    
+
     public function getFullAddressAttribute(): string
     {
         $address = $this->address;
         $parts = [];
-        
-        if (!empty($address['street'])) {
+
+        if (! empty($address['street'])) {
             $parts[] = $address['street'];
         }
-        if (!empty($address['city'])) {
+        if (! empty($address['city'])) {
             $parts[] = $address['city'];
         }
-        if (!empty($address['postal_code'])) {
+        if (! empty($address['postal_code'])) {
             $parts[] = $address['postal_code'];
         }
-        if (!empty($address['country'])) {
+        if (! empty($address['country'])) {
             $parts[] = $address['country'];
         }
-        
+
         return implode(', ', $parts);
     }
-    
+
     // ========== Methods ==========
-    
+
     public function generateInvoiceNumber(): string
     {
-        $prefix = $this->invoice_prefix . date('Ymd');
-        $last = Invoice::where('invoice_number', 'like', $prefix . '%')
+        $prefix = $this->invoice_prefix.date('Ymd');
+        $last = Invoice::where('invoice_number', 'like', $prefix.'%')
             ->orderBy('id', 'desc')
             ->first();
-            
+
         $number = $last ? intval(substr($last->invoice_number, -4)) + 1 : 1;
-        
-        return $prefix . '-' . str_pad($number, 4, '0', STR_PAD_LEFT);
+
+        return $prefix.'-'.str_pad($number, 4, '0', STR_PAD_LEFT);
     }
 }

@@ -9,13 +9,10 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('vendor_products', function (Blueprint $table) {
-            $table->uuid('id')->primary();
+            $table->id();
             $table->uuid('uuid')->unique();
-            
-            // foreignUuid: FK references uuid
-            $table->foreignUuid('vendor_id')->references('uuid')->on('vendors')->cascadeOnDelete();
-            $table->foreignUuid('vendor_store_id')->references('uuid')->on('vendor_stores')->cascadeOnDelete();
-            
+            $table->foreignId('vendor_id')->constrained('vendors')->cascadeOnDelete();
+            $table->foreignId('vendor_store_id')->constrained('vendor_stores')->cascadeOnDelete();
             $table->unsignedInteger('magento_product_id');
             $table->string('magento_sku', 255);
             $table->string('sku', 255);
@@ -31,14 +28,11 @@ return new class extends Migration
             $table->json('metadata')->nullable();
             $table->timestamps();
             $table->softDeletes();
-            
-            // Indexes
+
             $table->index('magento_product_id');
             $table->index('sku');
             $table->index('status');
             $table->index('sync_status');
-            
-            // Unique constraints
             $table->unique(['vendor_id', 'magento_product_id'], 'vendor_products_vendor_magento_unique');
             $table->unique(['vendor_id', 'sku'], 'vendor_products_vendor_sku_unique');
         });

@@ -26,7 +26,7 @@ class CustomerWishlistController extends Controller
             'data' => $wishlist,
             'meta' => [
                 'total' => Wishlist::where('customer_id', $customer->id)->count(),
-            ]
+            ],
         ]);
     }
 
@@ -47,7 +47,7 @@ class CustomerWishlistController extends Controller
         if ($exists) {
             return response()->json([
                 'success' => false,
-                'message' => 'Product already in wishlist'
+                'message' => 'Product already in wishlist',
             ], 422);
         }
 
@@ -60,7 +60,7 @@ class CustomerWishlistController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Product added to wishlist',
-            'data' => $wishlistItem
+            'data' => $wishlistItem,
         ], 201);
     }
 
@@ -75,16 +75,16 @@ class CustomerWishlistController extends Controller
             ->where('product_id', $productId)
             ->delete();
 
-        if (!$deleted) {
+        if (! $deleted) {
             return response()->json([
                 'success' => false,
-                'message' => 'Product not found in wishlist'
+                'message' => 'Product not found in wishlist',
             ], 404);
         }
 
         return response()->json([
             'success' => true,
-            'message' => 'Product removed from wishlist'
+            'message' => 'Product removed from wishlist',
         ]);
     }
 
@@ -99,7 +99,7 @@ class CustomerWishlistController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Wishlist cleared successfully'
+            'message' => 'Wishlist cleared successfully',
         ]);
     }
 
@@ -114,10 +114,10 @@ class CustomerWishlistController extends Controller
             ->where('product_id', $productId)
             ->first();
 
-        if (!$wishlistItem) {
+        if (! $wishlistItem) {
             return response()->json([
                 'success' => false,
-                'message' => 'Product not found in wishlist'
+                'message' => 'Product not found in wishlist',
             ], 404);
         }
 
@@ -131,7 +131,8 @@ class CustomerWishlistController extends Controller
                 'product_id' => $productId,
                 'sku' => $wishlistItem->product->sku,
                 'name' => $wishlistItem->product->name,
-            ]
+            ],
         ]);
     }
 }
+

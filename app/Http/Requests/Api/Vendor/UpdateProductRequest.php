@@ -12,13 +12,13 @@ class UpdateProductRequest extends FormRequest
     public function authorize(): bool
     {
         $user = $this->user();
-        
-        if (!$user || !$user->vendor) {
+
+        if (! $user || ! $user->vendor) {
             return false;
         }
 
         $product = $this->route('product');
-        
+
         // Check if product belongs to this vendor
         return $product && $product->vendor_id === $user->vendor->id;
     }
@@ -29,9 +29,9 @@ class UpdateProductRequest extends FormRequest
     public function rules(): array
     {
         $product = $this->route('product');
-        
+
         return [
-            'sku' => 'sometimes|string|max:255|unique:vendor_products,sku,' . ($product ? $product->id : 'NULL'),
+            'sku' => 'sometimes|string|max:255|unique:vendor_products,sku,'.($product ? $product->id : 'NULL'),
             'name' => 'sometimes|string|max:500',
             'description' => 'nullable|string',
             'short_description' => 'nullable|string|max:500',
@@ -108,7 +108,7 @@ class UpdateProductRequest extends FormRequest
             $urlKey = preg_replace('/[^a-z0-9-]+/', '-', $urlKey);
             $urlKey = preg_replace('/-+/', '-', $urlKey);
             $urlKey = trim($urlKey, '-');
-            
+
             $this->merge([
                 'seo_data' => array_merge($this->input('seo_data', []), [
                     'url_key' => $urlKey,
@@ -125,7 +125,7 @@ class UpdateProductRequest extends FormRequest
         $validator->after(function ($validator) {
             // Check if special price is provided but dates are missing
             if ($this->has('special_price') && $this->special_price !== null) {
-                if (!$this->has('special_price_from') && !$this->has('special_price_to')) {
+                if (! $this->has('special_price_from') && ! $this->has('special_price_to')) {
                     // Dates are optional, but warn if both missing
                     // No error, just use indefinite special price
                 }

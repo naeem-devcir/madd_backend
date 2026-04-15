@@ -11,12 +11,12 @@ return new class extends Migration
         Schema::create('activity_logs', function (Blueprint $table) {
             $table->id();
             $table->uuid('uuid')->unique();
-            
+
             // foreignUuid: FK references uuid
-            $table->foreignUuid('user_id')->nullable()->references('uuid')->on('users')->nullOnDelete();
-            $table->foreignUuid('vendor_id')->nullable()->references('uuid')->on('vendors')->nullOnDelete();
-            $table->foreignUuid('store_id')->nullable()->references('uuid')->on('vendor_stores')->nullOnDelete();
-            
+            $table->foreignId('user_id')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignId('vendor_id')->nullable()->constrained('vendors')->nullOnDelete();
+            $table->foreignId('store_id')->nullable()->constrained('vendor_stores')->nullOnDelete();
+
             $table->string('action');
             $table->string('module');
             $table->text('description')->nullable();
@@ -25,7 +25,7 @@ return new class extends Migration
             $table->string('ip_address', 45)->nullable();
             $table->text('user_agent')->nullable();
             $table->timestamps();
-            
+
             // Indexes
             $table->index('action');
             $table->index('module');

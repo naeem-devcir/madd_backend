@@ -46,3 +46,4 @@ class MlmAgentController extends PlaceholderApiController
         return $this->notImplemented('MLM structure');
     }
 }
+

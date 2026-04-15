@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Api\Order;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\Notification\SendReturnRequestNotification;
 use App\Models\Order\Order;
-use App\Models\Order\Return as ReturnModel;
+use App\Models\Order\OrderItem;
 use App\Models\Return\ReturnItem;
+use App\Models\Return\ReturnModel;
 use App\Services\Order\ReturnService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -26,14 +28,14 @@ class ReturnController extends Controller
     {
         $customer = auth()->user();
 
-        $returns = ReturnModel::where('customer_id', $customer->uuid)
+        $returns = ReturnModel::where('customer_id', $customer->id)
             ->with(['order', 'items', 'courier'])
             ->orderBy('created_at', 'desc')
             ->paginate($request->get('per_page', 20));
 
         return response()->json([
             'success' => true,
-            'data' => $returns
+            'data' => $returns,
         ]);
     }
 
@@ -52,7 +54,7 @@ class ReturnController extends Controller
 
         $customer = auth()->user();
 
-        $order = Order::where('customer_id', $customer->uuid)
+        $order = Order::where('customer_id', $customer->id)
             ->whereIn('status', ['delivered', 'shipped'])
             ->findOrFail($orderId);
 
@@ -61,7 +63,7 @@ class ReturnController extends Controller
         if ($order->delivered_at && $order->delivered_at->diffInDays(now()) > $returnWindowDays) {
             return response()->json([
                 'success' => false,
-                'message' => 'Return window has expired'
+                'message' => 'Return window has expired',
             ], 422);
         }
 
@@ -69,8 +71,8 @@ class ReturnController extends Controller
 
         try {
             $return = ReturnModel::create([
-                'order_id' => $order->uuid,
-                'customer_id' => $customer->uuid,
+                'order_id' => $order->id,
+                'customer_id' => $customer->id,
                 'vendor_id' => $order->vendor_id,
                 'status' => 'requested',
                 'reason' => $request->reason,
@@ -78,11 +80,11 @@ class ReturnController extends Controller
             ]);
 
             foreach ($request->items as $item) {
-                $orderItem = \App\Models\Order\OrderItem::findOrFail($item['order_item_id']);
+                $orderItem = OrderItem::findOrFail($item['order_item_id']);
 
                 ReturnItem::create([
-                    'return_id' => $return->uuid,
-                    'order_item_id' => $orderItem->uuid,
+                    'return_id' => $return->id,
+                    'order_item_id' => $orderItem->id,
                     'quantity' => $item['quantity'],
                     'reason' => $item['reason'] ?? $request->reason,
                 ]);
@@ -91,7 +93,7 @@ class ReturnController extends Controller
             DB::commit();
 
             // Notify vendor
-            \App\Jobs\Notification\SendReturnRequestNotification::dispatch($return);
+            SendReturnRequestNotification::dispatch($return);
 
             return response()->json([
                 'success' => true,
@@ -100,7 +102,7 @@ class ReturnController extends Controller
                     'return_id' => $return->id,
                     'rma_number' => $return->rma_number,
                     'status' => $return->status,
-                ]
+                ],
             ], 201);
 
         } catch (\Exception $e) {
@@ -109,7 +111,7 @@ class ReturnController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create return request',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -121,13 +123,13 @@ class ReturnController extends Controller
     {
         $customer = auth()->user();
 
-        $return = ReturnModel::where('customer_id', $customer->uuid)
+        $return = ReturnModel::where('customer_id', $customer->id)
             ->with(['order', 'items.orderItem', 'courier'])
             ->findOrFail($id);
 
         return response()->json([
             'success' => true,
-            'data' => $return
+            'data' => $return,
         ]);
     }
 
@@ -138,7 +140,7 @@ class ReturnController extends Controller
     {
         $customer = auth()->user();
 
-        $return = ReturnModel::where('customer_id', $customer->uuid)
+        $return = ReturnModel::where('customer_id', $customer->id)
             ->where('status', 'requested')
             ->findOrFail($id);
 
@@ -152,7 +154,7 @@ class ReturnController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Return request cancelled'
+                'message' => 'Return request cancelled',
             ]);
 
         } catch (\Exception $e) {
@@ -161,7 +163,7 @@ class ReturnController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to cancel return',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -173,14 +175,14 @@ class ReturnController extends Controller
     {
         $customer = auth()->user();
 
-        $return = ReturnModel::where('customer_id', $customer->uuid)
+        $return = ReturnModel::where('customer_id', $customer->id)
             ->where('status', 'approved')
             ->findOrFail($id);
 
-        if (!$return->return_label_url) {
+        if (! $return->return_label_url) {
             return response()->json([
                 'success' => false,
-                'message' => 'Return label not available'
+                'message' => 'Return label not available',
             ], 404);
         }
 
@@ -189,7 +191,7 @@ class ReturnController extends Controller
             'data' => [
                 'label_url' => $return->return_label_url,
                 'tracking_number' => $return->tracking_number,
-            ]
+            ],
         ]);
     }
 }

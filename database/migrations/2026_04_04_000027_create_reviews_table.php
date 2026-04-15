@@ -13,15 +13,11 @@ return new class extends Migration
             $table->uuid('uuid')->unique();
             $table->integer('magento_review_id')->nullable();
             $table->integer('magento_product_id');
-            
-            // foreignUuid: FK references uuid
-            $table->foreignUuid('customer_id')->nullable()->references('uuid')->on('users')->nullOnDelete();
-            $table->foreignUuid('vendor_id')->nullable()->references('uuid')->on('vendors')->nullOnDelete();
-            $table->foreignUuid('vendor_store_id')->references('uuid')->on('vendor_stores')->cascadeOnDelete();
-            $table->uuid('vendor_product_id')->nullable();
-            $table->foreign('vendor_product_id')->references('id')->on('vendor_products')->nullOnDelete();
-            $table->foreignUuid('moderated_by')->nullable()->references('uuid')->on('users')->nullOnDelete();
-            
+            $table->foreignId('customer_id')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignId('vendor_id')->nullable()->constrained('vendors')->nullOnDelete();
+            $table->foreignId('vendor_store_id')->constrained('vendor_stores')->cascadeOnDelete();
+            $table->foreignId('vendor_product_id')->nullable()->constrained('vendor_products')->nullOnDelete();
+            $table->foreignId('moderated_by')->nullable()->constrained('users')->nullOnDelete();
             $table->tinyInteger('rating');
             $table->string('title')->nullable();
             $table->text('body')->nullable();
@@ -37,8 +33,7 @@ return new class extends Migration
             $table->timestamp('vendor_response_at')->nullable();
             $table->timestamps();
             $table->softDeletes();
-            
-            // Simple indexes
+
             $table->index('magento_review_id');
             $table->index('magento_product_id');
             $table->index('status');

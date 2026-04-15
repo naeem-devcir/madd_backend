@@ -11,9 +11,9 @@ return new class extends Migration
         Schema::create('api_keys', function (Blueprint $table) {
             $table->id();
             $table->uuid('uuid')->unique();
-            
+
             // foreignUuid: FK references uuid
-            $table->foreignUuid('vendor_id')->nullable()->references('uuid')->on('vendors')->nullOnDelete();
+            $table->foreignId('vendor_id')->nullable()->constrained('vendors')->nullOnDelete();
             $table->string('name');
             $table->string('key_hash')->unique();
             $table->string('key_preview', 50);
@@ -26,12 +26,12 @@ return new class extends Migration
             $table->timestamp('last_used_at')->nullable();
             $table->timestamp('expires_at')->nullable();
             $table->boolean('is_active')->default(true);
-            
-            $table->foreignUuid('created_by')->nullable()->references('uuid')->on('users')->nullOnDelete();
-            
+
+            $table->foreignId('created_by')->nullable()->constrained('users')->nullOnDelete();
+
             $table->timestamps();
             $table->softDeletes();
-            
+
             $table->index('is_active');
             $table->index('key_hash');
         });

@@ -7,9 +7,6 @@ use App\Models\Notification\Notification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log as FacadesLog;
 
-use function Illuminate\Log\log;
-
-
 class NotificationController extends Controller
 {
     /**
@@ -18,15 +15,14 @@ class NotificationController extends Controller
     public function index(Request $request)
     {
 
-        
-
         $user = auth()->user();
 
         $notifications = Notification::where('notifiable_type', get_class($user))
             ->where('notifiable_id', $user->id)
             ->orderBy('created_at', 'desc')
             ->paginate($request->input('per_page', 20));
-// FacadesLog::info($notifications);
+
+        // FacadesLog::info($notifications);
         return response()->json([
             'success' => true,
             'data' => $notifications,
@@ -38,7 +34,7 @@ class NotificationController extends Controller
                 'total' => Notification::where('notifiable_type', get_class($user))
                     ->where('notifiable_id', $user->id)
                     ->count(),
-            ]
+            ],
         ]);
     }
 
@@ -57,7 +53,7 @@ class NotificationController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Notification marked as read'
+            'message' => 'Notification marked as read',
         ]);
     }
 
@@ -75,7 +71,7 @@ class NotificationController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'All notifications marked as read'
+            'message' => 'All notifications marked as read',
         ]);
     }
 
@@ -94,7 +90,7 @@ class NotificationController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Notification deleted'
+            'message' => 'Notification deleted',
         ]);
     }
 
@@ -123,7 +119,7 @@ class NotificationController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $preferences
+            'data' => $preferences,
         ]);
     }
 
@@ -154,7 +150,8 @@ class NotificationController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Preferences updated successfully',
-            'data' => $preferences['notifications']
+            'data' => $preferences['notifications'],
         ]);
     }
 }
+

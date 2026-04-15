@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Api\Customer;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\OrderResource;
 use App\Models\Order\Order;
-use App\Models\Order\Return as ReturnModel;
 use App\Services\Order\OrderService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -26,7 +25,7 @@ class CustomerOrderController extends Controller
     {
         $customer = $request->user();
 
-        $query = Order::where('customer_id', $customer->uuid)
+        $query = Order::where('customer_id', $customer->id)
             ->orWhere('customer_email', $customer->email)
             ->with(['items', 'vendor', 'vendorStore', 'tracking']);
 
@@ -53,7 +52,7 @@ class CustomerOrderController extends Controller
                 'current_page' => $orders->currentPage(),
                 'last_page' => $orders->lastPage(),
                 'total' => $orders->total(),
-            ]
+            ],
         ]);
     }
 
@@ -64,16 +63,16 @@ class CustomerOrderController extends Controller
     {
         $customer = auth()->user();
 
-        $order = Order::where(function($query) use ($customer) {
-                $query->where('customer_id', $customer->uuid)
-                    ->orWhere('customer_email', $customer->email);
-            })
+        $order = Order::where(function ($query) use ($customer) {
+            $query->where('customer_id', $customer->id)
+                ->orWhere('customer_email', $customer->email);
+        })
             ->with(['items', 'vendor', 'vendorStore', 'tracking', 'statusHistory', 'paymentTransactions'])
             ->findOrFail($id);
 
         return response()->json([
             'success' => true,
-            'data' => new OrderResource($order)
+            'data' => new OrderResource($order),
         ]);
     }
 
@@ -88,17 +87,17 @@ class CustomerOrderController extends Controller
 
         $customer = auth()->user();
 
-        $order = Order::where(function($query) use ($customer) {
-                $query->where('customer_id', $customer->uuid)
-                    ->orWhere('customer_email', $customer->email);
-            })
+        $order = Order::where(function ($query) use ($customer) {
+            $query->where('customer_id', $customer->id)
+                ->orWhere('customer_email', $customer->email);
+        })
             ->whereIn('status', ['pending', 'processing'])
             ->findOrFail($id);
 
-        if (!$order->canBeCancelled()) {
+        if (! $order->canBeCancelled()) {
             return response()->json([
                 'success' => false,
-                'message' => 'Order cannot be cancelled at this stage'
+                'message' => 'Order cannot be cancelled at this stage',
             ], 422);
         }
 
@@ -115,7 +114,7 @@ class CustomerOrderController extends Controller
                 'data' => [
                     'order_id' => $order->id,
                     'status' => $order->status,
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
@@ -124,7 +123,7 @@ class CustomerOrderController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to cancel order',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -136,17 +135,17 @@ class CustomerOrderController extends Controller
     {
         $customer = auth()->user();
 
-        $order = Order::where(function($query) use ($customer) {
-                $query->where('customer_id', $customer->uuid)
-                    ->orWhere('customer_email', $customer->email);
-            })
+        $order = Order::where(function ($query) use ($customer) {
+            $query->where('customer_id', $customer->id)
+                ->orWhere('customer_email', $customer->email);
+        })
             ->with(['tracking', 'tracking.carrier'])
             ->findOrFail($id);
 
-        if (!$order->tracking) {
+        if (! $order->tracking) {
             return response()->json([
                 'success' => false,
-                'message' => 'No tracking information available'
+                'message' => 'No tracking information available',
             ], 404);
         }
 
@@ -162,8 +161,8 @@ class CustomerOrderController extends Controller
                     'status' => $order->tracking->status,
                     'estimated_delivery' => $order->tracking->estimated_delivery,
                     'events' => $order->tracking->tracking_events,
-                ]
-            ]
+                ],
+            ],
         ]);
     }
 
@@ -174,18 +173,18 @@ class CustomerOrderController extends Controller
     {
         $customer = auth()->user();
 
-        $order = Order::where(function($query) use ($customer) {
-                $query->where('customer_id', $customer->uuid)
-                    ->orWhere('customer_email', $customer->email);
-            })
+        $order = Order::where(function ($query) use ($customer) {
+            $query->where('customer_id', $customer->id)
+                ->orWhere('customer_email', $customer->email);
+        })
             ->findOrFail($id);
 
         $invoice = $order->invoices()->where('type', 'customer_invoice')->first();
 
-        if (!$invoice || !$invoice->pdf_path) {
+        if (! $invoice || ! $invoice->pdf_path) {
             return response()->json([
                 'success' => false,
-                'message' => 'Invoice not available'
+                'message' => 'Invoice not available',
             ], 404);
         }
 
@@ -194,7 +193,7 @@ class CustomerOrderController extends Controller
             'data' => [
                 'download_url' => $invoice->getPdfUrl(),
                 'invoice_number' => $invoice->invoice_number,
-            ]
+            ],
         ]);
     }
 }

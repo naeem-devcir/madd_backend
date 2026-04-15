@@ -11,11 +11,11 @@ return new class extends Migration
         Schema::create('vendor_payouts', function (Blueprint $table) {
             $table->id();
             $table->uuid('uuid')->unique();
-            
+
             // foreignUuid: FK references uuid
-            $table->foreignUuid('vendor_id')->references('uuid')->on('vendors')->cascadeOnDelete();
-            $table->foreignUuid('settlement_id')->nullable()->references('uuid')->on('settlements')->nullOnDelete();
-            
+            $table->foreignId('vendor_id')->constrained('vendors')->cascadeOnDelete();
+            $table->foreignId('settlement_id')->nullable()->constrained('settlements')->nullOnDelete();
+
             $table->decimal('amount', 12, 4);
             $table->char('currency', 3);
             $table->enum('payout_method', ['paypal', 'stripe', 'bank_transfer', 'manual']);
@@ -23,15 +23,15 @@ return new class extends Migration
             $table->enum('status', ['pending', 'processing', 'completed', 'failed', 'cancelled'])->default('pending');
             $table->string('gateway_payout_id')->nullable();
             $table->json('gateway_response')->nullable();
-            
-            $table->foreignUuid('processed_by')->nullable()->references('uuid')->on('users')->nullOnDelete();
-            
+
+            $table->foreignId('processed_by')->nullable()->constrained('users')->nullOnDelete();
+
             $table->timestamp('processed_at')->nullable();
             $table->timestamp('completed_at')->nullable();
             $table->text('failure_reason')->nullable();
             $table->json('metadata')->nullable();
             $table->timestamps();
-            
+
             // Indexes
             $table->index('status');
             $table->index('gateway_payout_id');

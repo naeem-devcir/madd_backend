@@ -9,9 +9,9 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class VendorPlan extends Model
 {
     use HasFactory, SoftDeletes;
-    
+
     protected $table = 'vendor_plans';
-    
+
     protected $fillable = [
         'name',
         'slug',
@@ -33,7 +33,7 @@ class VendorPlan extends Model
         'sort_order',
         'trial_period_days',
     ];
-    
+
     protected $casts = [
         'price_monthly' => 'decimal:2',
         'price_yearly' => 'decimal:2',
@@ -52,50 +52,50 @@ class VendorPlan extends Model
         'sort_order' => 'integer',
         'trial_period_days' => 'integer',
     ];
-    
+
     // ========== Relationships ==========
-    
+
     public function vendors()
     {
         return $this->hasMany(Vendor::class, 'plan_id', 'id');
     }
-    
+
     // ========== Scopes ==========
-    
+
     public function scopeActive($query)
     {
         return $query->where('is_active', true);
     }
-    
+
     public function scopeDefault($query)
     {
         return $query->where('is_default', true);
     }
-    
+
     // ========== Accessors ==========
-    
+
     public function getMonthlyPriceFormattedAttribute(): string
     {
-        return number_format($this->price_monthly, 2) . ' ' . config('app.currency', 'EUR');
+        return number_format($this->price_monthly, 2).' '.config('app.currency', 'EUR');
     }
-    
+
     public function getYearlyPriceFormattedAttribute(): string
     {
-        return number_format($this->price_yearly, 2) . ' ' . config('app.currency', 'EUR');
+        return number_format($this->price_yearly, 2).' '.config('app.currency', 'EUR');
     }
-    
+
     public function getHasTrialAttribute(): bool
     {
         return $this->trial_period_days > 0;
     }
-    
+
     // ========== Methods ==========
-    
+
     public function getFeatureValue(string $feature, $default = false)
     {
         return $this->features[$feature] ?? $default;
     }
-    
+
     public function calculateMonthlyPriceWithTax(float $taxRate = 0): float
     {
         return $this->price_monthly * (1 + $taxRate / 100);

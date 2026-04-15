@@ -37,3 +37,4 @@ class AdminThemeController extends PlaceholderApiController
         return $this->notImplemented('Admin default theme selection', ['id' => $id]);
     }
 }
+

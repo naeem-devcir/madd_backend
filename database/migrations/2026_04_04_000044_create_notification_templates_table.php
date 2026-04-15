@@ -19,7 +19,6 @@ return new class extends Migration
             $table->json('variables')->nullable();
             $table->boolean('is_active')->default(true);
             $table->timestamps();
-            
             $table->index('code');
             $table->index('is_active');
         });

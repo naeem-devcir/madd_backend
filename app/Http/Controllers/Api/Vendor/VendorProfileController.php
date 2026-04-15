@@ -8,6 +8,7 @@ use App\Http\Resources\VendorResource;
 use App\Models\Vendor\Vendor;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class VendorProfileController extends Controller
 {
@@ -20,7 +21,7 @@ class VendorProfileController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => new VendorResource($vendor)
+            'data' => new VendorResource($vendor),
         ]);
     }
 
@@ -72,7 +73,7 @@ class VendorProfileController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Profile updated successfully',
-                'data' => new VendorResource($vendor->fresh(['user', 'plan']))
+                'data' => new VendorResource($vendor->fresh(['user', 'plan'])),
             ]);
 
         } catch (\Exception $e) {
@@ -81,7 +82,7 @@ class VendorProfileController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update profile',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -96,7 +97,7 @@ class VendorProfileController extends Controller
         $steps = [
             1 => [
                 'name' => 'Company Information',
-                'completed' => !empty($vendor->company_name) && !empty($vendor->address_line1),
+                'completed' => ! empty($vendor->company_name) && ! empty($vendor->address_line1),
                 'required' => true,
             ],
             2 => [
@@ -131,7 +132,7 @@ class VendorProfileController extends Controller
                 'is_complete' => $isComplete,
                 'steps' => $steps,
                 'next_step' => $this->getNextStep($currentStep, $steps),
-            ]
+            ],
         ]);
     }
 
@@ -140,6 +141,9 @@ class VendorProfileController extends Controller
      */
     public function updateOnboardingStep(Request $request)
     {
+
+        Log::info($request->all());
+
         $request->validate([
             'step' => 'required|integer|min:1|max:5',
         ]);
@@ -153,7 +157,7 @@ class VendorProfileController extends Controller
             'message' => 'Onboarding step updated',
             'data' => [
                 'current_step' => $vendor->onboarding_step,
-            ]
+            ],
         ]);
     }
 
@@ -163,7 +167,7 @@ class VendorProfileController extends Controller
     private function getNextStep($currentStep, $steps)
     {
         for ($i = $currentStep; $i <= count($steps); $i++) {
-            if (!$steps[$i]['completed'] && $steps[$i]['required']) {
+            if (! $steps[$i]['completed'] && $steps[$i]['required']) {
                 return $i;
             }
         }
@@ -171,3 +175,4 @@ class VendorProfileController extends Controller
         return null;
     }
 }
+

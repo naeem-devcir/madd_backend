@@ -74,10 +74,10 @@ class VendorReportController extends Controller
 
         // Daily/Monthly breakdown
         $groupBy = $request->group_by ?? 'day';
-        
+
         $breakdown = (clone $query)
             ->select(
-                DB::raw($this->getDateGroupSql($groupBy, 'created_at') . ' as period'),
+                DB::raw($this->getDateGroupSql($groupBy, 'created_at').' as period'),
                 DB::raw('COUNT(*) as order_count'),
                 DB::raw('SUM(grand_total) as revenue'),
                 DB::raw('AVG(grand_total) as avg_order_value'),
@@ -102,8 +102,8 @@ class VendorReportController extends Controller
 
         // Sales by country
         $salesByCountry = (clone $query)
-            ->select(DB::raw("JSON_UNQUOTE(JSON_EXTRACT(shipping_address, '$.country_id')) as country"), 
-                DB::raw('COUNT(*) as order_count'), 
+            ->select(DB::raw("JSON_UNQUOTE(JSON_EXTRACT(shipping_address, '$.country_id')) as country"),
+                DB::raw('COUNT(*) as order_count'),
                 DB::raw('SUM(grand_total) as revenue'))
             ->groupBy('country')
             ->get();
@@ -120,7 +120,7 @@ class VendorReportController extends Controller
                 'by_store' => $salesByStore,
                 'by_payment' => $salesByPayment,
                 'by_country' => $salesByCountry,
-            ]
+            ],
         ]);
     }
 
@@ -137,7 +137,7 @@ class VendorReportController extends Controller
             'limit' => 'nullable|integer|min:1|max:100',
         ]);
 
-        $startDate = match($request->period) {
+        $startDate = match ($request->period) {
             'week' => now()->subWeek(),
             'quarter' => now()->subQuarter(),
             'year' => now()->subYear(),
@@ -200,7 +200,7 @@ class VendorReportController extends Controller
                 'top_products' => $topProducts,
                 'inventory_summary' => $inventorySummary,
                 'category_performance' => $categoryPerformance,
-            ]
+            ],
         ]);
     }
 
@@ -216,7 +216,7 @@ class VendorReportController extends Controller
             'limit' => 'nullable|integer|min:1|max:100',
         ]);
 
-        $startDate = match($request->period) {
+        $startDate = match ($request->period) {
             'week' => now()->subWeek(),
             'quarter' => now()->subQuarter(),
             'year' => now()->subYear(),
@@ -289,7 +289,7 @@ class VendorReportController extends Controller
                 'top_customers' => $topCustomers,
                 'customer_statistics' => $customerStats,
                 'customer_type_breakdown' => $customerTypeBreakdown,
-            ]
+            ],
         ]);
     }
 
@@ -309,7 +309,7 @@ class VendorReportController extends Controller
         ]);
 
         // Get report data based on type
-        $data = match($request->report_type) {
+        $data = match ($request->report_type) {
             'sales' => $this->getSalesExportData($vendor, $request),
             'products' => $this->getProductsExportData($vendor, $request),
             'customers' => $this->getCustomersExportData($vendor, $request),
@@ -325,7 +325,7 @@ class VendorReportController extends Controller
                 'download_url' => $filename,
                 'expires_in' => 3600, // 1 hour
                 'file_size' => $data['size'] ?? null,
-            ]
+            ],
         ]);
     }
 
@@ -341,11 +341,11 @@ class VendorReportController extends Controller
 
         return [
             'headers' => ['Order ID', 'Date', 'Customer', 'Email', 'Items', 'Subtotal', 'Tax', 'Shipping', 'Total', 'Status'],
-            'rows' => $orders->map(function($order) {
+            'rows' => $orders->map(function ($order) {
                 return [
                     $order->order_number,
                     $order->created_at->format('Y-m-d H:i:s'),
-                    $order->customer_firstname . ' ' . $order->customer_lastname,
+                    $order->customer_firstname.' '.$order->customer_lastname,
                     $order->customer_email,
                     $order->items->sum('qty_ordered'),
                     $order->subtotal,
@@ -369,7 +369,7 @@ class VendorReportController extends Controller
 
         return [
             'headers' => ['SKU', 'Name', 'Store', 'Price', 'Stock', 'Status', 'Total Sold', 'Total Revenue'],
-            'rows' => $products->map(function($product) {
+            'rows' => $products->map(function ($product) {
                 return [
                     $product->sku,
                     $product->name,
@@ -389,18 +389,19 @@ class VendorReportController extends Controller
      */
     private function getCustomersExportData($vendor, $request)
     {
-        $customers = User::whereHas('orders', function($q) use ($vendor) {
-                $q->where('vendor_id', $vendor->getKey());
-            })
-            ->with(['orders' => function($q) use ($vendor) {
+        $customers = User::whereHas('orders', function ($q) use ($vendor) {
+            $q->where('vendor_id', $vendor->getKey());
+        })
+            ->with(['orders' => function ($q) use ($vendor) {
                 $q->where('vendor_id', $vendor->getKey());
             }])
             ->get();
 
         return [
             'headers' => ['Name', 'Email', 'Total Orders', 'Total Spent', 'Average Order', 'First Order', 'Last Order'],
-            'rows' => $customers->map(function($customer) {
+            'rows' => $customers->map(function ($customer) {
                 $orders = $customer->orders;
+
                 return [
                     $customer->full_name,
                     $customer->email,
@@ -421,7 +422,7 @@ class VendorReportController extends Controller
     {
         // In production, this would generate an actual file using Laravel Excel
         // For now, return a mock response
-        return storage_path("app/exports/{$type}_report_" . date('Ymd_His') . ".{$format}");
+        return storage_path("app/exports/{$type}_report_".date('Ymd_His').".{$format}");
     }
 
     /**
@@ -429,7 +430,7 @@ class VendorReportController extends Controller
      */
     private function getDateGroupSql($groupBy, $column)
     {
-        return match($groupBy) {
+        return match ($groupBy) {
             'day' => "DATE({$column})",
             'week' => "CONCAT(YEAR({$column}), '-W', WEEK({$column}))",
             'month' => "DATE_FORMAT({$column}, '%Y-%m')",
@@ -448,3 +449,4 @@ class VendorReportController extends Controller
         ], 501);
     }
 }
+

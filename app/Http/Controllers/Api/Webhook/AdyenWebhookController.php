@@ -12,3 +12,4 @@ class AdyenWebhookController extends PlaceholderApiController
         return $this->notImplemented('Adyen webhook handling');
     }
 }
+

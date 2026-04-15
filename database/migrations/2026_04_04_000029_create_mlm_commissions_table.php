@@ -11,11 +11,11 @@ return new class extends Migration
         Schema::create('mlm_commissions', function (Blueprint $table) {
             $table->id();
             $table->uuid('uuid')->unique();
-            
+
             // foreignUuid: FK references uuid
-            $table->foreignUuid('agent_id')->references('uuid')->on('mlm_agents')->cascadeOnDelete();
-            $table->foreignUuid('settlement_id')->nullable()->references('uuid')->on('settlements')->nullOnDelete();
-            
+            $table->foreignId('agent_id')->constrained('mlm_agents')->cascadeOnDelete();
+            $table->foreignId('settlement_id')->nullable()->constrained('settlements')->nullOnDelete();
+
             $table->enum('source_type', ['vendor_signup', 'vendor_sale']);
             $table->unsignedBigInteger('source_id');
             $table->decimal('amount', 12, 4);
@@ -27,7 +27,7 @@ return new class extends Migration
             $table->timestamp('paid_at')->nullable();
             $table->timestamps();
             $table->softDeletes();
-            
+
             $table->index(['source_type', 'source_id']);
             $table->index('status');
         });

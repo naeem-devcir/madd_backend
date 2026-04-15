@@ -25,19 +25,19 @@ class OrderStatusHistory extends Model
     ];
 
     // ========== Relationships ==========
-    
+
     public function order()
     {
-        return $this->belongsTo(Order::class, 'order_id', 'uuid');
+        return $this->belongsTo(Order::class, 'order_id', 'id');
     }
-    
+
     public function changedBy()
     {
-        return $this->belongsTo(User::class, 'changed_by', 'uuid');
+        return $this->belongsTo(User::class, 'changed_by', 'id');
     }
-    
+
     // ========== Accessors ==========
-    
+
     public function getStatusLabelAttribute(): string
     {
         $labels = [
@@ -52,10 +52,10 @@ class OrderStatusHistory extends Model
             'payment_failed' => 'Payment Failed',
             'payment_refunded' => 'Payment Refunded',
         ];
-        
+
         return $labels[$this->status] ?? ucfirst($this->status);
     }
-    
+
     public function getStatusColorAttribute(): string
     {
         $colors = [
@@ -70,7 +70,7 @@ class OrderStatusHistory extends Model
             'payment_failed' => 'red',
             'payment_refunded' => 'orange',
         ];
-        
+
         return $colors[$this->status] ?? 'gray';
     }
 }

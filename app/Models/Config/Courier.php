@@ -46,52 +46,52 @@ class Courier extends Model
     ];
 
     // ========== Relationships ==========
-    
+
     public function orders()
     {
-        return $this->hasMany(Order::class, 'carrier_id', 'uuid');
+        return $this->hasMany(Order::class, 'carrier_id', 'id');
     }
-    
+
     // ========== Scopes ==========
-    
+
     public function scopeActive($query)
     {
         return $query->where('is_active', true);
     }
-    
+
     public function scopeByCountry($query, $countryCode)
     {
         return $query->whereJsonContains('countries', $countryCode);
     }
-    
+
     public function scopeByApiType($query, $apiType)
     {
         return $query->where('api_type', $apiType);
     }
-    
+
     // ========== Accessors ==========
-    
+
     public function getTrackingUrl(string $trackingNumber): string
     {
         if ($this->tracking_url_template) {
             return str_replace('{tracking_number}', $trackingNumber, $this->tracking_url_template);
         }
-        
+
         return '#';
     }
-    
+
     public function getHasDpaAttribute(): bool
     {
         return (bool) $this->data_processing_agreement;
     }
-    
+
     // ========== Methods ==========
-    
+
     public function supportsCountry(string $countryCode): bool
     {
         return in_array($countryCode, $this->countries ?? []);
     }
-    
+
     public function getServiceLevel(string $level): ?array
     {
         return $this->service_levels[$level] ?? null;

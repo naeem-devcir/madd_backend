@@ -6,7 +6,6 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\VendorResource;
 use App\Models\Vendor\Vendor;
 use App\Models\Vendor\VendorPlan;
-use App\Models\User;
 use App\Services\Vendor\VendorService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -45,13 +44,13 @@ class AdminVendorController extends Controller
         }
 
         if ($request->has('search')) {
-            $query->where(function($q) use ($request) {
-                $q->where('company_name', 'like', '%' . $request->search . '%')
-                  ->orWhere('company_slug', 'like', '%' . $request->search . '%')
-                  ->orWhere('vat_number', 'like', '%' . $request->search . '%')
-                  ->orWhereHas('user', function($sub) use ($request) {
-                      $sub->where('email', 'like', '%' . $request->search . '%');
-                  });
+            $query->where(function ($q) use ($request) {
+                $q->where('company_name', 'like', '%'.$request->search.'%')
+                    ->orWhere('company_slug', 'like', '%'.$request->search.'%')
+                    ->orWhere('vat_number', 'like', '%'.$request->search.'%')
+                    ->orWhereHas('user', function ($sub) use ($request) {
+                        $sub->where('email', 'like', '%'.$request->search.'%');
+                    });
             });
         }
 
@@ -65,7 +64,7 @@ class AdminVendorController extends Controller
                 'current_page' => $vendors->currentPage(),
                 'last_page' => $vendors->lastPage(),
                 'total' => $vendors->total(),
-            ]
+            ],
         ]);
     }
 
@@ -79,7 +78,7 @@ class AdminVendorController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => new VendorResource($vendor)
+            'data' => new VendorResource($vendor),
         ]);
     }
 
@@ -93,7 +92,7 @@ class AdminVendorController extends Controller
         if ($vendor->status !== 'pending') {
             return response()->json([
                 'success' => false,
-                'message' => 'Vendor is not in pending status'
+                'message' => 'Vendor is not in pending status',
             ], 422);
         }
 
@@ -107,7 +106,7 @@ class AdminVendorController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Vendor approved successfully',
-                'data' => new VendorResource($vendor->fresh())
+                'data' => new VendorResource($vendor->fresh()),
             ]);
 
         } catch (\Exception $e) {
@@ -116,7 +115,7 @@ class AdminVendorController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to approve vendor',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -142,7 +141,7 @@ class AdminVendorController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Vendor suspended successfully',
-                'data' => new VendorResource($vendor->fresh())
+                'data' => new VendorResource($vendor->fresh()),
             ]);
 
         } catch (\Exception $e) {
@@ -151,7 +150,7 @@ class AdminVendorController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to suspend vendor',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -166,7 +165,7 @@ class AdminVendorController extends Controller
         if ($vendor->status !== 'suspended') {
             return response()->json([
                 'success' => false,
-                'message' => 'Vendor is not suspended'
+                'message' => 'Vendor is not suspended',
             ], 422);
         }
 
@@ -180,7 +179,7 @@ class AdminVendorController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Vendor activated successfully',
-                'data' => new VendorResource($vendor->fresh())
+                'data' => new VendorResource($vendor->fresh()),
             ]);
 
         } catch (\Exception $e) {
@@ -189,7 +188,7 @@ class AdminVendorController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to activate vendor',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -217,7 +216,7 @@ class AdminVendorController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Vendor plan updated successfully',
-                'data' => new VendorResource($vendor->fresh())
+                'data' => new VendorResource($vendor->fresh()),
             ]);
 
         } catch (\Exception $e) {
@@ -226,7 +225,7 @@ class AdminVendorController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update vendor plan',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -246,7 +245,7 @@ class AdminVendorController extends Controller
             'data' => VendorResource::collection($applications),
             'meta' => [
                 'total_pending' => Vendor::where('status', 'pending')->count(),
-            ]
+            ],
         ]);
     }
 
@@ -283,7 +282,7 @@ class AdminVendorController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $stats
+            'data' => $stats,
         ]);
     }
 
@@ -311,3 +310,4 @@ class AdminVendorController extends Controller
         ], 501);
     }
 }
+

@@ -17,3 +17,4 @@ class InventoryIntegrationController extends PlaceholderApiController
         return $this->notImplemented('Inventory integration batch update');
     }
 }
+

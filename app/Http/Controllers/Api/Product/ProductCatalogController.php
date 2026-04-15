@@ -33,15 +33,15 @@ class ProductCatalogController extends Controller
 
         // Find the store first
         $store = VendorStore::where('id', $request->store_id)->first();
-        
-        if (!$store) {
+
+        if (! $store) {
             return response()->json([
                 'success' => false,
                 'message' => 'Store not found',
-                'store_id' => $request->store_id
+                'store_id' => $request->store_id,
             ], 404);
         }
-        
+
         // Check if store is active
         if ($store->status !== 'active') {
             return response()->json([
@@ -49,13 +49,13 @@ class ProductCatalogController extends Controller
                 'message' => 'This store is currently not active',
                 'store_id' => $store->id,
                 'store_name' => $store->store_name,
-                'current_status' => $store->status
+                'current_status' => $store->status,
             ], 403);
         }
 
         // Get products from Magento via GraphQL (this is a proxy)
         // For now, we'll query our reference table
-        $query = VendorProduct::where('vendor_store_id', $store->uuid)
+        $query = VendorProduct::where('vendor_store_id', $store->id)
             ->where('status', 'active')
             ->where('sync_status', 'synced');
 
@@ -102,7 +102,7 @@ class ProductCatalogController extends Controller
                     'categories' => $this->getCategories($store),
                     'price_range' => $this->getPriceRange($store),
                 ],
-            ]
+            ],
         ]);
     }
 
@@ -112,37 +112,37 @@ class ProductCatalogController extends Controller
     public function show($storeSlug, $productSlug)
     {
         $store = VendorStore::where('store_slug', $storeSlug)->first();
-        
-        if (!$store) {
+
+        if (! $store) {
             return response()->json([
                 'success' => false,
                 'message' => 'Store not found',
-                'store_slug' => $storeSlug
+                'store_slug' => $storeSlug,
             ], 404);
         }
-        
+
         if ($store->status !== 'active') {
             return response()->json([
                 'success' => false,
                 'message' => 'This store is currently not active',
-                'store_name' => $store->store_name
+                'store_name' => $store->store_name,
             ], 403);
         }
 
         // This should query Magento GraphQL for real-time product data
         // For now, return product reference
-        $product = VendorProduct::where('vendor_store_id', $store->uuid)
-            ->where(function($query) use ($productSlug) {
+        $product = VendorProduct::where('vendor_store_id', $store->id)
+            ->where(function ($query) use ($productSlug) {
                 $query->where('sku', $productSlug)
                     ->orWhere('slug', $productSlug);
             })
             ->first();
-            
-        if (!$product) {
+
+        if (! $product) {
             return response()->json([
                 'success' => false,
                 'message' => 'Product not found',
-                'product_slug' => $productSlug
+                'product_slug' => $productSlug,
             ], 404);
         }
 
@@ -158,7 +158,7 @@ class ProductCatalogController extends Controller
                     ->where('status', 'approved')
                     ->with('customer')
                     ->paginate(10),
-            ]
+            ],
         ]);
     }
 
@@ -171,27 +171,27 @@ class ProductCatalogController extends Controller
             ->where('status', 'active')
             ->with(['vendor', 'store'])
             ->first();
-            
-        if (!$product) {
+
+        if (! $product) {
             return response()->json([
                 'success' => false,
                 'message' => 'Product not found',
-                'sku' => $sku
+                'sku' => $sku,
             ], 404);
         }
-        
+
         // Also check if the store is active
         if ($product->store && $product->store->status !== 'active') {
             return response()->json([
                 'success' => false,
                 'message' => 'Product is not available because the store is inactive',
-                'store_name' => $product->store->store_name
+                'store_name' => $product->store->store_name,
             ], 403);
         }
 
         return response()->json([
             'success' => true,
-            'data' => $product
+            'data' => $product,
         ]);
     }
 
@@ -201,19 +201,19 @@ class ProductCatalogController extends Controller
     public function related($productId)
     {
         $product = VendorProduct::find($productId);
-        
-        if (!$product) {
+
+        if (! $product) {
             return response()->json([
                 'success' => false,
                 'message' => 'Product not found',
-                'product_id' => $productId
+                'product_id' => $productId,
             ], 404);
         }
-        
+
         if ($product->status !== 'active') {
             return response()->json([
                 'success' => false,
-                'message' => 'Product is not active'
+                'message' => 'Product is not active',
             ], 403);
         }
 
@@ -226,7 +226,7 @@ class ProductCatalogController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $related
+            'data' => $related,
         ]);
     }
 
@@ -255,3 +255,4 @@ class ProductCatalogController extends Controller
         ];
     }
 }
+

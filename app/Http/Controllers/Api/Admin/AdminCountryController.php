@@ -37,3 +37,4 @@ class AdminCountryController extends PlaceholderApiController
         return $this->notImplemented('Admin country activation', ['code' => $code]);
     }
 }
+

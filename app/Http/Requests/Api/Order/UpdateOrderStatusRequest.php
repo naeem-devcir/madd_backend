@@ -45,24 +45,24 @@ class UpdateOrderStatusRequest extends FormRequest
                     if ($currentStatus === 'cancelled' && $value !== 'refunded') {
                         $fail('Cannot change status of a cancelled order.');
                     }
-                    if ($currentStatus === 'delivered' && !in_array($value, ['completed', 'refunded'])) {
+                    if ($currentStatus === 'delivered' && ! in_array($value, ['completed', 'refunded'])) {
                         $fail('Delivered orders can only be marked as completed or refunded.');
                     }
-                    if ($currentStatus === 'shipped' && !in_array($value, ['delivered', 'cancelled'])) {
+                    if ($currentStatus === 'shipped' && ! in_array($value, ['delivered', 'cancelled'])) {
                         $fail('Shipped orders can only be marked as delivered or cancelled.');
                     }
                 },
             ],
             'notes' => 'nullable|string|max:1000',
             'notify_customer' => 'boolean',
-            
+
             // For shipped status
             'tracking_number' => 'required_if:status,shipped|nullable|string|max:100',
             'carrier_id' => 'required_if:status,shipped|nullable|exists:couriers,id',
-            
+
             // For cancelled status
             'cancellation_reason' => 'required_if:status,cancelled|nullable|string|max:500',
-            
+
             // For refunded status
             'refund_amount' => 'required_if:status,refunded|nullable|numeric|min:0',
             'refund_reason' => 'required_if:status,refunded|nullable|string|max:500',

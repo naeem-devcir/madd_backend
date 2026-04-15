@@ -26,22 +26,13 @@ class ReturnItem extends Model
         'refund_amount' => 'decimal:4',
     ];
 
-    // ========== Relationships ==========
-    
-    public function return()
+    public function returnRecord()
     {
-        return $this->belongsTo(Return::class, 'return_id', 'uuid');
+        return $this->belongsTo(ReturnModel::class, 'return_id');
     }
-    
+
     public function orderItem()
     {
-        return $this->belongsTo(OrderItem::class, 'order_item_id', 'uuid');
-    }
-    
-    // ========== Accessors ==========
-    
-    public function getFormattedRefundAmountAttribute(): string
-    {
-        return $this->return->order->currency_code . ' ' . number_format($this->refund_amount, 2);
+        return $this->belongsTo(OrderItem::class, 'order_item_id');
     }
 }

@@ -36,3 +36,4 @@ class VendorReturnController extends PlaceholderApiController
         return $this->notImplemented('Vendor return refund', ['id' => $id]);
     }
 }
+

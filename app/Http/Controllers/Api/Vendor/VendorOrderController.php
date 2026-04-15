@@ -4,9 +4,9 @@ namespace App\Http\Controllers\Api\Vendor;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\OrderResource;
+use App\Models\Config\Courier;
 use App\Models\Order\Order;
 use App\Models\Order\OrderTracking;
-use App\Models\Config\Courier;
 use App\Services\Order\OrderService;
 use App\Services\Shipping\LabelService;
 use Illuminate\Http\Request;
@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\DB;
 class VendorOrderController extends Controller
 {
     protected $orderService;
+
     protected $labelService;
 
     public function __construct(OrderService $orderService, LabelService $labelService)
@@ -61,11 +62,11 @@ class VendorOrderController extends Controller
         }
 
         if ($request->has('search')) {
-            $query->where(function($q) use ($request) {
-                $q->where('order_number', 'like', '%' . $request->search . '%')
-                  ->orWhere('customer_email', 'like', '%' . $request->search . '%')
-                  ->orWhere('customer_firstname', 'like', '%' . $request->search . '%')
-                  ->orWhere('customer_lastname', 'like', '%' . $request->search . '%');
+            $query->where(function ($q) use ($request) {
+                $q->where('order_number', 'like', '%'.$request->search.'%')
+                    ->orWhere('customer_email', 'like', '%'.$request->search.'%')
+                    ->orWhere('customer_firstname', 'like', '%'.$request->search.'%')
+                    ->orWhere('customer_lastname', 'like', '%'.$request->search.'%');
             });
         }
 
@@ -80,7 +81,7 @@ class VendorOrderController extends Controller
                 'last_page' => $orders->lastPage(),
                 'total' => $orders->total(),
                 'filters' => $request->only(['status', 'payment_status', 'store_id', 'date_from', 'date_to']),
-            ]
+            ],
         ]);
     }
 
@@ -106,7 +107,7 @@ class VendorOrderController extends Controller
                 'can_cancel' => $order->canBeCancelled(),
                 'can_refund' => $order->canBeRefunded(),
                 'can_ship' => $order->status === 'processing',
-            ]
+            ],
         ]);
     }
 
@@ -143,7 +144,7 @@ class VendorOrderController extends Controller
                 'data' => [
                     'order_id' => $order->id,
                     'status' => $order->status,
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
@@ -152,7 +153,7 @@ class VendorOrderController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update order status',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -187,12 +188,12 @@ class VendorOrderController extends Controller
             }
 
             // Mark as shipped
-            $order->markAsShipped($request->tracking_number, $carrier->uuid);
+            $order->markAsShipped($request->tracking_number, $carrier->id);
 
             // Store tracking info
             OrderTracking::create([
-                'order_id' => $order->uuid,
-                'carrier_id' => $carrier->uuid,
+                'order_id' => $order->id,
+                'carrier_id' => $carrier->id,
                 'tracking_number' => $request->tracking_number,
                 'label_url' => $labelUrl,
                 'status' => 'shipped',
@@ -209,7 +210,7 @@ class VendorOrderController extends Controller
                     'label_url' => $labelUrl,
                     'carrier' => $carrier->name,
                     'tracking_url' => $carrier->getTrackingUrl($request->tracking_number),
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
@@ -218,7 +219,7 @@ class VendorOrderController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create shipment',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -273,7 +274,7 @@ class VendorOrderController extends Controller
                     'success_count' => $successCount,
                     'failed_count' => count($failedOrders),
                     'failed_orders' => $failedOrders,
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
@@ -282,7 +283,7 @@ class VendorOrderController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update orders',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -313,14 +314,14 @@ class VendorOrderController extends Controller
                     'label_url' => $label['label_url'],
                     'tracking_number' => $label['tracking_number'],
                     'carrier' => $carrier->name,
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to generate label',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -354,7 +355,7 @@ class VendorOrderController extends Controller
                 'summary' => $stats,
                 'pending_actions' => $pendingActions,
                 'recent_orders' => OrderResource::collection($recentOrders),
-            ]
+            ],
         ]);
     }
 
@@ -391,7 +392,7 @@ class VendorOrderController extends Controller
                 'csv_data' => $csvData,
                 'total_records' => $orders->count(),
                 'export_date' => now()->toIso8601String(),
-            ]
+            ],
         ]);
     }
 
@@ -401,8 +402,8 @@ class VendorOrderController extends Controller
     private function generateCsv($orders)
     {
         $headers = [
-            'Order ID', 'Date', 'Customer', 'Email', 'Total', 'Status', 
-            'Payment Status', 'Items Count', 'Shipping Method', 'Tracking Number'
+            'Order ID', 'Date', 'Customer', 'Email', 'Total', 'Status',
+            'Payment Status', 'Items Count', 'Shipping Method', 'Tracking Number',
         ];
 
         $rows = [];
@@ -411,7 +412,7 @@ class VendorOrderController extends Controller
             $rows[] = [
                 $order->order_number,
                 $order->created_at->format('Y-m-d H:i:s'),
-                $order->customer_firstname . ' ' . $order->customer_lastname,
+                $order->customer_firstname.' '.$order->customer_lastname,
                 $order->customer_email,
                 $order->grand_total,
                 $order->status,
@@ -452,3 +453,4 @@ class VendorOrderController extends Controller
         ], 501);
     }
 }
+

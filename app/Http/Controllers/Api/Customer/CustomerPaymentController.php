@@ -16,3 +16,4 @@ class CustomerPaymentController extends PlaceholderApiController
         return $this->notImplemented('Customer payment method deletion', ['id' => $id]);
     }
 }
+

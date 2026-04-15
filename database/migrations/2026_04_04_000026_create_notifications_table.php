@@ -9,10 +9,10 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('notifications', function (Blueprint $table) {
-            $table->uuid('id')->primary();
+            $table->id();
+            $table->uuid('uuid')->unique();
             $table->string('type')->index();
-            $table->string('notifiable_type');
-            $table->string('notifiable_id', 36)->index();  // Changed to support UUID
+            $table->morphs('notifiable');
             $table->enum('channel', ['email', 'sms', 'push', 'in_app']);
             $table->json('data');
             $table->enum('priority', ['high', 'medium', 'low'])->default('medium');
@@ -21,9 +21,8 @@ return new class extends Migration
             $table->timestamp('sent_at')->nullable();
             $table->timestamps();
             $table->softDeletes();
-            
-            // Indexes
-            $table->index(['notifiable_type', 'notifiable_id']);
+
+            // $table->index(['notifiable_type', 'notifiable_id']);
         });
     }
 

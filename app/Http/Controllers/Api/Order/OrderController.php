@@ -4,9 +4,8 @@ namespace App\Http\Controllers\Api\Order;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\OrderResource;
+use App\Jobs\Report\GenerateExportJob;
 use App\Models\Order\Order;
-use App\Models\Order\OrderItem;
-use App\Models\Order\Return as ReturnModel;
 use App\Services\Order\OrderService;
 use App\Services\Payment\PaymentService;
 use Illuminate\Http\Request;
@@ -16,6 +15,7 @@ use Illuminate\Support\Facades\Validator;
 class OrderController extends Controller
 {
     protected $orderService;
+
     protected $paymentService;
 
     public function __construct(OrderService $orderService, PaymentService $paymentService)
@@ -58,11 +58,11 @@ class OrderController extends Controller
 
         if ($request->has('search')) {
             $search = $request->search;
-            $query->where(function($q) use ($search) {
+            $query->where(function ($q) use ($search) {
                 $q->where('magento_order_increment_id', 'like', "%{$search}%")
-                  ->orWhere('customer_email', 'like', "%{$search}%")
-                  ->orWhere('customer_firstname', 'like', "%{$search}%")
-                  ->orWhere('customer_lastname', 'like', "%{$search}%");
+                    ->orWhere('customer_email', 'like', "%{$search}%")
+                    ->orWhere('customer_firstname', 'like', "%{$search}%")
+                    ->orWhere('customer_lastname', 'like', "%{$search}%");
             });
         }
 
@@ -77,7 +77,7 @@ class OrderController extends Controller
                 'last_page' => $orders->lastPage(),
                 'total' => $orders->total(),
                 'filters' => $request->only(['status', 'payment_status', 'vendor_id', 'date_from', 'date_to']),
-            ]
+            ],
         ]);
     }
 
@@ -87,17 +87,17 @@ class OrderController extends Controller
     public function show($id)
     {
         $order = Order::with([
-            'vendor', 
-            'vendorStore', 
-            'customer', 
-            'items', 
+            'vendor',
+            'vendorStore',
+            'customer',
+            'items',
             'items.vendorProduct',
-            'tracking', 
+            'tracking',
             'tracking.carrier',
             'statusHistory',
             'paymentTransactions',
             'refunds',
-            'settlement'
+            'settlement',
         ])->findOrFail($id);
 
         // Get order timeline
@@ -110,7 +110,7 @@ class OrderController extends Controller
                 'timeline' => $timeline,
                 'can_cancel' => $order->canBeCancelled(),
                 'can_refund' => $order->canBeRefunded(),
-            ]
+            ],
         ]);
     }
 
@@ -127,7 +127,7 @@ class OrderController extends Controller
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
@@ -149,7 +149,7 @@ class OrderController extends Controller
                     'old_status' => $oldStatus,
                     'new_status' => $order->status,
                     'notes' => $request->notes,
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
@@ -158,7 +158,7 @@ class OrderController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update order status',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -178,7 +178,7 @@ class OrderController extends Controller
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
@@ -211,7 +211,7 @@ class OrderController extends Controller
                     'updated_count' => $updatedCount,
                     'failed_orders' => $failedOrders,
                     'status' => $request->status,
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
@@ -220,7 +220,7 @@ class OrderController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update orders',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -237,16 +237,16 @@ class OrderController extends Controller
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
         $order = Order::findOrFail($id);
 
-        if (!$order->canBeCancelled()) {
+        if (! $order->canBeCancelled()) {
             return response()->json([
                 'success' => false,
-                'message' => 'Order cannot be cancelled at this stage'
+                'message' => 'Order cannot be cancelled at this stage',
             ], 422);
         }
 
@@ -265,7 +265,7 @@ class OrderController extends Controller
                     'order_number' => $order->order_number,
                     'status' => $order->status,
                     'cancelled_at' => now()->toIso8601String(),
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
@@ -274,7 +274,7 @@ class OrderController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to cancel order',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -301,7 +301,7 @@ class OrderController extends Controller
             'average_order_value' => $query->avg('grand_total') ?? 0,
             'total_commission' => $query->sum('commission_amount'),
             'total_refunds' => $query->sum('total_refunded_amount'),
-            
+
             'by_status' => [
                 'pending' => (clone $query)->where('status', 'pending')->count(),
                 'processing' => (clone $query)->where('status', 'processing')->count(),
@@ -310,7 +310,7 @@ class OrderController extends Controller
                 'cancelled' => (clone $query)->where('status', 'cancelled')->count(),
                 'refunded' => (clone $query)->where('status', 'refunded')->count(),
             ],
-            
+
             'by_payment_status' => [
                 'pending' => (clone $query)->where('payment_status', 'pending')->count(),
                 'paid' => (clone $query)->where('payment_status', 'paid')->count(),
@@ -344,7 +344,7 @@ class OrderController extends Controller
                 'summary' => $stats,
                 'daily_sales' => $dailySales,
                 'top_products' => $topProducts,
-            ]
+            ],
         ]);
     }
 
@@ -363,7 +363,7 @@ class OrderController extends Controller
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
@@ -384,11 +384,11 @@ class OrderController extends Controller
         $orders = $query->get();
 
         // Generate export file
-        $exportData = $orders->map(function($order) {
+        $exportData = $orders->map(function ($order) {
             return [
                 'Order Number' => $order->order_number,
                 'Customer Email' => $order->customer_email,
-                'Customer Name' => $order->customer_firstname . ' ' . $order->customer_lastname,
+                'Customer Name' => $order->customer_firstname.' '.$order->customer_lastname,
                 'Status' => $order->status,
                 'Payment Status' => $order->payment_status,
                 'Subtotal' => $order->subtotal,
@@ -406,7 +406,7 @@ class OrderController extends Controller
         });
 
         // Dispatch job to generate export file
-        $exportJob = new \App\Jobs\Report\GenerateExportJob($exportData, $request->format, auth()->user());
+        $exportJob = new GenerateExportJob($exportData, $request->format, auth()->user());
         dispatch($exportJob);
 
         return response()->json([
@@ -415,7 +415,7 @@ class OrderController extends Controller
             'data' => [
                 'record_count' => $exportData->count(),
                 'format' => $request->format,
-            ]
+            ],
         ]);
     }
 
@@ -425,20 +425,20 @@ class OrderController extends Controller
     public function invoice($id)
     {
         $order = Order::findOrFail($id);
-        
+
         $invoice = $order->invoices()->where('type', 'customer_invoice')->first();
 
-        if (!$invoice) {
+        if (! $invoice) {
             return response()->json([
                 'success' => false,
-                'message' => 'Invoice not found for this order'
+                'message' => 'Invoice not found for this order',
             ], 404);
         }
 
-        if (!$invoice->pdf_path) {
+        if (! $invoice->pdf_path) {
             return response()->json([
                 'success' => false,
-                'message' => 'Invoice PDF not generated yet'
+                'message' => 'Invoice PDF not generated yet',
             ], 404);
         }
 
@@ -450,7 +450,7 @@ class OrderController extends Controller
                 'issued_at' => $invoice->issued_at->toDateString(),
                 'total' => $invoice->total,
                 'currency' => $invoice->currency_code,
-            ]
+            ],
         ]);
     }
 }

@@ -9,17 +9,12 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('product_drafts', function (Blueprint $table) {
-            $table->uuid('id')->primary();
+            $table->id();
             $table->uuid('uuid')->unique();
-            
-            // foreignUuid: FK references uuid
-            $table->foreignUuid('vendor_id')->references('uuid')->on('vendors')->cascadeOnDelete();
-            $table->foreignUuid('vendor_store_id')->references('uuid')->on('vendor_stores')->cascadeOnDelete();
-            $table->uuid('vendor_product_id')->nullable();
-            $table->foreign('vendor_product_id')->references('id')->on('vendor_products')->nullOnDelete();
-            $table->uuid('parent_draft_id')->nullable();
-            $table->foreign('parent_draft_id')->references('id')->on('product_drafts')->nullOnDelete();
-            
+            $table->foreignId('vendor_id')->constrained('vendors')->cascadeOnDelete();
+            $table->foreignId('vendor_store_id')->constrained('vendor_stores')->cascadeOnDelete();
+            $table->foreignId('vendor_product_id')->nullable()->constrained('vendor_products')->nullOnDelete();
+            $table->foreignId('parent_draft_id')->nullable()->constrained('product_drafts')->nullOnDelete();
             $table->integer('version')->default(1);
             $table->string('sku', 255);
             $table->string('name', 500);
@@ -42,11 +37,11 @@ return new class extends Migration
             $table->boolean('auto_approve')->default(false);
             $table->timestamp('scheduled_publish_at')->nullable();
             $table->unsignedInteger('magento_product_id')->nullable();
-            $table->foreignUuid('reviewed_by')->nullable()->references('uuid')->on('users')->nullOnDelete();
+            $table->foreignId('reviewed_by')->nullable()->constrained('users')->nullOnDelete();
             $table->timestamp('reviewed_at')->nullable();
             $table->timestamp('published_at')->nullable();
             $table->timestamps();
-            
+
             $table->index(['vendor_id', 'status']);
             $table->index('sku');
             $table->index('status');

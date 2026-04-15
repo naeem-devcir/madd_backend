@@ -2,21 +2,18 @@
 
 namespace App\Models\Vendor;
 
-use App\Models\User;
+use App\Jobs\Notification\SendVendorUserInvitation;
 use App\Models\Traits\HasUuid;
+use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class VendorUser extends Model
 {
-    use HasFactory, SoftDeletes, HasUuid;
+    use HasFactory, HasUuid, SoftDeletes;
 
     protected $table = 'vendor_users';
-    
-    protected $primaryKey = 'id';
-    public $incrementing = false;
-    protected $keyType = 'string';
 
     protected $fillable = [
         'uuid',
@@ -43,33 +40,33 @@ class VendorUser extends Model
     ];
 
     // ========== Relationships ==========
-    
+
     /**
      * Get the vendor this user belongs to
      */
     public function vendor()
     {
-        return $this->belongsTo(Vendor::class, 'vendor_id', 'uuid');
+        return $this->belongsTo(Vendor::class, 'vendor_id', 'id');
     }
-    
+
     /**
      * Get the user account
      */
     public function user()
     {
-        return $this->belongsTo(User::class, 'user_id', 'uuid');
+        return $this->belongsTo(User::class, 'user_id', 'id');
     }
-    
+
     /**
      * Get the user who invited this user
      */
     public function invitedBy()
     {
-        return $this->belongsTo(User::class, 'invited_by', 'uuid');
+        return $this->belongsTo(User::class, 'invited_by', 'id');
     }
-    
+
     // ========== Scopes ==========
-    
+
     /**
      * Scope to active users
      */
@@ -77,7 +74,7 @@ class VendorUser extends Model
     {
         return $query->where('is_active', true);
     }
-    
+
     /**
      * Scope to inactive users
      */
@@ -85,7 +82,7 @@ class VendorUser extends Model
     {
         return $query->where('is_active', false);
     }
-    
+
     /**
      * Scope by role
      */
@@ -93,7 +90,7 @@ class VendorUser extends Model
     {
         return $query->where('role', $role);
     }
-    
+
     /**
      * Scope to pending invitations (not accepted)
      */
@@ -101,7 +98,7 @@ class VendorUser extends Model
     {
         return $query->whereNull('accepted_at')->where('is_active', true);
     }
-    
+
     /**
      * Scope to accepted invitations
      */
@@ -109,7 +106,7 @@ class VendorUser extends Model
     {
         return $query->whereNotNull('accepted_at');
     }
-    
+
     /**
      * Scope by vendor
      */
@@ -117,9 +114,9 @@ class VendorUser extends Model
     {
         return $query->where('vendor_id', $vendorId);
     }
-    
+
     // ========== Accessors ==========
-    
+
     /**
      * Get role label
      */
@@ -133,10 +130,10 @@ class VendorUser extends Model
             'seo' => 'SEO Specialist',
             'support' => 'Customer Support',
         ];
-        
+
         return $labels[$this->role] ?? ucfirst($this->role);
     }
-    
+
     /**
      * Get role icon
      */
@@ -150,24 +147,24 @@ class VendorUser extends Model
             'seo' => '🔍',
             'support' => '💬',
         ];
-        
+
         return $icons[$this->role] ?? '👤';
     }
-    
+
     /**
      * Get permission list
      */
     public function getPermissionListAttribute(): array
     {
         $basePermissions = $this->getBasePermissionsForRole();
-        
+
         if ($this->permissions) {
             return array_merge($basePermissions, $this->permissions);
         }
-        
+
         return $basePermissions;
     }
-    
+
     /**
      * Check if invitation is pending
      */
@@ -175,15 +172,15 @@ class VendorUser extends Model
     {
         return is_null($this->accepted_at) && $this->is_active;
     }
-    
+
     /**
      * Check if user is accepted
      */
     public function getIsAcceptedAttribute(): bool
     {
-        return !is_null($this->accepted_at);
+        return ! is_null($this->accepted_at);
     }
-    
+
     /**
      * Get user's full name
      */
@@ -191,7 +188,7 @@ class VendorUser extends Model
     {
         return $this->user?->full_name ?? 'Unknown User';
     }
-    
+
     /**
      * Get user's email
      */
@@ -199,21 +196,21 @@ class VendorUser extends Model
     {
         return $this->user?->email ?? 'unknown@example.com';
     }
-    
+
     /**
      * Get days since invitation
      */
     public function getDaysSinceInvitationAttribute(): int
     {
-        if (!$this->invited_at) {
+        if (! $this->invited_at) {
             return 0;
         }
-        
+
         return now()->diffInDays($this->invited_at);
     }
-    
+
     // ========== Methods ==========
-    
+
     /**
      * Get base permissions for role
      */
@@ -245,10 +242,10 @@ class VendorUser extends Model
                 'send_messages', 'view_tickets',
             ],
         ];
-        
+
         return $permissions[$this->role] ?? [];
     }
-    
+
     /**
      * Check if user has a specific permission
      */
@@ -256,7 +253,7 @@ class VendorUser extends Model
     {
         return in_array($permission, $this->permission_list);
     }
-    
+
     /**
      * Accept invitation
      */
@@ -264,11 +261,11 @@ class VendorUser extends Model
     {
         $this->accepted_at = now();
         $this->save();
-        
+
         // Assign role to user
         $this->user->assignRole('vendor_user');
     }
-    
+
     /**
      * Resend invitation
      */
@@ -276,11 +273,11 @@ class VendorUser extends Model
     {
         $this->invited_at = now();
         $this->save();
-        
+
         // Send invitation email
-        \App\Jobs\Notification\SendVendorUserInvitation::dispatch($this);
+        SendVendorUserInvitation::dispatch($this);
     }
-    
+
     /**
      * Deactivate user
      */
@@ -288,11 +285,11 @@ class VendorUser extends Model
     {
         $this->is_active = false;
         $this->save();
-        
+
         // Revoke user tokens
         $this->user?->tokens()->delete();
     }
-    
+
     /**
      * Activate user
      */
@@ -301,7 +298,7 @@ class VendorUser extends Model
         $this->is_active = true;
         $this->save();
     }
-    
+
     /**
      * Update last login info
      */
@@ -311,7 +308,7 @@ class VendorUser extends Model
         $this->last_login_ip = $ip;
         $this->save();
     }
-    
+
     /**
      * Get notification preference for channel
      */
@@ -319,7 +316,7 @@ class VendorUser extends Model
     {
         return $this->notification_prefs[$channel][$type] ?? true;
     }
-    
+
     /**
      * Update notification preferences
      */

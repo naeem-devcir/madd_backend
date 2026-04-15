@@ -13,23 +13,23 @@ return new class extends Migration
             $table->foreignId('permission_id')
                 ->constrained('permissions')
                 ->cascadeOnDelete();
-            
+
             // Polymorphic relationship
             $table->string('model_type');
             $table->unsignedBigInteger('model_id'); // Integer, not char
-            
+
             // Who granted this permission - references users.id (bigint)
-            $table->foreignUuid('granted_by')
+            $table->foreignId('granted_by')
                 ->nullable()
-                ->references('uuid')->on('users')
+                ->constrained('users')
                 ->nullOnDelete();
-            
+
             // Timestamp
             $table->timestamp('granted_at')->useCurrent();
-            
+
             // Primary key
             $table->primary(['permission_id', 'model_id', 'model_type'], 'model_has_permissions_primary');
-            
+
             // Indexes for performance
             $table->index('model_id');
             $table->index('model_type');

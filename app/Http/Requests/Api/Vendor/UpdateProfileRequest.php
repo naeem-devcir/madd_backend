@@ -3,7 +3,6 @@
 namespace App\Http\Requests\Api\Vendor;
 
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
 
 class UpdateProfileRequest extends FormRequest
 {
@@ -28,34 +27,34 @@ class UpdateProfileRequest extends FormRequest
             'company_name' => 'sometimes|string|max:255',
             'legal_name' => 'sometimes|string|max:255',
             'trading_name' => 'nullable|string|max:255',
-            'vat_number' => 'nullable|string|max:50|unique:vendors,vat_number,' . $vendor->id,
+            'vat_number' => 'nullable|string|max:50|unique:vendors,vat_number,'.$vendor->id,
             'registration_number' => 'nullable|string|max:100',
-            
+
             // Contact Information
             'phone' => 'nullable|string|max:20',
             'website' => 'nullable|url|max:255',
             'contact_email' => 'nullable|email|max:255',
-            
+
             // Address
             'address_line1' => 'sometimes|string|max:255',
             'address_line2' => 'nullable|string|max:255',
             'city' => 'sometimes|string|max:100',
             'postal_code' => 'sometimes|string|max:20',
             'country_code' => 'sometimes|string|size:2|exists:country_configs,code',
-            
+
             // Business Details
             'description' => 'nullable|string|max:5000',
             'timezone' => 'sometimes|string|max:50|timezone',
-            
+
             // Personal Information (User)
             'first_name' => 'sometimes|string|max:100',
             'last_name' => 'sometimes|string|max:100',
-            'email' => 'sometimes|email|unique:users,email,' . $user->id,
-            
+            'email' => 'sometimes|email|unique:users,email,'.$user->id,
+
             // Branding
             'logo' => 'nullable|image|max:2048|mimes:jpeg,png,jpg,gif,svg',
             'banner' => 'nullable|image|max:5120|mimes:jpeg,png,jpg,gif,svg',
-            
+
             // Social Media
             'social_links' => 'nullable|array',
             'social_links.facebook' => 'nullable|url',
@@ -63,7 +62,7 @@ class UpdateProfileRequest extends FormRequest
             'social_links.twitter' => 'nullable|url',
             'social_links.linkedin' => 'nullable|url',
             'social_links.youtube' => 'nullable|url',
-            
+
             // Bank Account (if updating)
             'bank_account' => 'nullable|array',
             'bank_account.account_holder_name' => 'required_with:bank_account|string|max:255',
@@ -166,7 +165,7 @@ class UpdateProfileRequest extends FormRequest
             // Validate IBAN format if provided
             if ($this->has('bank_account.iban') && $this->bank_account['iban']) {
                 $iban = str_replace(' ', '', strtoupper($this->bank_account['iban']));
-                
+
                 // Simple IBAN validation (length check)
                 $validLengths = [
                     'AL' => 28, 'AD' => 24, 'AT' => 20, 'AZ' => 28, 'BH' => 22, 'BE' => 16, 'BA' => 20,
@@ -180,10 +179,10 @@ class UpdateProfileRequest extends FormRequest
                     'SI' => 19, 'ES' => 24, 'SE' => 24, 'CH' => 21, 'TN' => 24, 'TR' => 26, 'AE' => 23,
                     'GB' => 22, 'VG' => 24,
                 ];
-                
+
                 $countryCode = substr($iban, 0, 2);
                 $expectedLength = $validLengths[$countryCode] ?? null;
-                
+
                 if ($expectedLength && strlen($iban) !== $expectedLength) {
                     $validator->errors()->add(
                         'bank_account.iban',

@@ -12,13 +12,13 @@ return new class extends Migration
             $table->id();
             $table->uuid('uuid')->unique();
             $table->string('rma_number', 50)->unique();
-            
+
             // foreignUuid: FK references uuid
-            $table->foreignUuid('order_id')->references('uuid')->on('orders')->cascadeOnDelete();
-            $table->foreignUuid('customer_id')->references('uuid')->on('users')->cascadeOnDelete();
-            $table->foreignUuid('vendor_id')->references('uuid')->on('vendors')->cascadeOnDelete();
-            $table->foreignUuid('courier_id')->nullable()->references('uuid')->on('couriers')->nullOnDelete();
-            
+            $table->foreignId('order_id')->constrained('orders')->cascadeOnDelete();
+            $table->foreignId('customer_id')->constrained('users')->cascadeOnDelete();
+            $table->foreignId('vendor_id')->constrained('vendors')->cascadeOnDelete();
+            $table->foreignId('courier_id')->nullable()->constrained('couriers')->nullOnDelete();
+
             $table->enum('status', ['requested', 'approved', 'rejected', 'shipped', 'received', 'refunded', 'cancelled'])->default('requested')->index();
             $table->enum('return_type', ['full', 'partial', 'exchange', 'warranty', 'damaged', 'wrong_item'])->default('full');
             $table->enum('reason', ['defective', 'wrong_size', 'wrong_color', 'not_as_described', 'damaged_in_shipping', 'no_longer_needed', 'better_price', 'other'])->nullable();
@@ -43,7 +43,7 @@ return new class extends Migration
             $table->enum('disposition', ['restock', 'refurbish', 'donate', 'recycle', 'destroy'])->nullable();
             $table->timestamps();
             $table->softDeletes();
-            
+
             $table->index(['order_id', 'status']);
             $table->index(['customer_id', 'status']);
             $table->index(['vendor_id', 'status']);

@@ -5,7 +5,7 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\OrderResource;
 use App\Models\Order\Order;
-use App\Models\Order\Return as ReturnModel;
+use App\Models\Return\ReturnModel;
 use App\Services\Order\OrderService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -60,12 +60,12 @@ class AdminOrderController extends Controller
         }
 
         if ($request->has('search')) {
-            $query->where(function($q) use ($request) {
-                $q->where('order_number', 'like', '%' . $request->search . '%')
-                  ->orWhere('customer_email', 'like', '%' . $request->search . '%')
-                  ->orWhere('customer_firstname', 'like', '%' . $request->search . '%')
-                  ->orWhere('customer_lastname', 'like', '%' . $request->search . '%')
-                  ->orWhere('magento_order_increment_id', 'like', '%' . $request->search . '%');
+            $query->where(function ($q) use ($request) {
+                $q->where('order_number', 'like', '%'.$request->search.'%')
+                    ->orWhere('customer_email', 'like', '%'.$request->search.'%')
+                    ->orWhere('customer_firstname', 'like', '%'.$request->search.'%')
+                    ->orWhere('customer_lastname', 'like', '%'.$request->search.'%')
+                    ->orWhere('magento_order_increment_id', 'like', '%'.$request->search.'%');
             });
         }
 
@@ -93,7 +93,7 @@ class AdminOrderController extends Controller
                 'current_page' => $orders->currentPage(),
                 'last_page' => $orders->lastPage(),
                 'total' => $orders->total(),
-            ]
+            ],
         ]);
     }
 
@@ -103,24 +103,24 @@ class AdminOrderController extends Controller
     public function show($id)
     {
         $order = Order::with([
-            'vendor', 
-            'vendorStore', 
-            'customer', 
-            'items', 
+            'vendor',
+            'vendorStore',
+            'customer',
+            'items',
             'items.vendorProduct',
-            'statusHistory', 
-            'tracking', 
+            'statusHistory',
+            'tracking',
             'tracking.carrier',
             'paymentTransactions',
             'refunds',
-            'settlement'
+            'settlement',
         ])->findOrFail($id);
 
         // Get order timeline
         $timeline = $this->orderService->getOrderTimeline($order);
 
         // Get return requests for this order
-        $returns = ReturnModel::where('order_id', $order->uuid)->get();
+        $returns = ReturnModel::where('order_id', $order->id)->get();
 
         return response()->json([
             'success' => true,
@@ -130,7 +130,7 @@ class AdminOrderController extends Controller
                 'returns' => $returns,
                 'can_cancel' => $order->canBeCancelled(),
                 'can_refund' => $order->canBeRefunded(),
-            ]
+            ],
         ]);
     }
 
@@ -159,7 +159,7 @@ class AdminOrderController extends Controller
                 'data' => [
                     'order_id' => $order->id,
                     'status' => $order->status,
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
@@ -168,7 +168,7 @@ class AdminOrderController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update order status',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -198,7 +198,7 @@ class AdminOrderController extends Controller
                 'data' => [
                     'order_id' => $order->id,
                     'payment_status' => $order->payment_status,
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
@@ -207,7 +207,7 @@ class AdminOrderController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update payment status',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -223,10 +223,10 @@ class AdminOrderController extends Controller
 
         $order = Order::findOrFail($id);
 
-        if (!$order->canBeCancelled()) {
+        if (! $order->canBeCancelled()) {
             return response()->json([
                 'success' => false,
-                'message' => 'Order cannot be cancelled at this stage'
+                'message' => 'Order cannot be cancelled at this stage',
             ], 422);
         }
 
@@ -243,7 +243,7 @@ class AdminOrderController extends Controller
                 'data' => [
                     'order_id' => $order->id,
                     'status' => $order->status,
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
@@ -252,7 +252,7 @@ class AdminOrderController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to cancel order',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -285,7 +285,7 @@ class AdminOrderController extends Controller
             'message' => 'Note added successfully',
             'data' => [
                 'notes' => $order->admin_notes,
-            ]
+            ],
         ]);
     }
 
@@ -295,7 +295,7 @@ class AdminOrderController extends Controller
     public function statistics(Request $request)
     {
         $period = $request->get('period', '30_days');
-        $startDate = match($period) {
+        $startDate = match ($period) {
             '7_days' => now()->subDays(7),
             '30_days' => now()->subDays(30),
             '90_days' => now()->subDays(90),
@@ -370,7 +370,7 @@ class AdminOrderController extends Controller
                 'period' => $period,
                 'start_date' => $startDate->toDateString(),
                 'end_date' => now()->toDateString(),
-            ]
+            ],
         ]);
     }
 
@@ -396,15 +396,15 @@ class AdminOrderController extends Controller
 
         $orders = $query->get();
 
-        $filename = 'orders_export_' . date('Y-m-d_His') . '.csv';
+        $filename = 'orders_export_'.date('Y-m-d_His').'.csv';
         $handle = fopen('php://temp', 'w');
 
         // Headers
         fputcsv($handle, [
-            'Order ID', 'Order Number', 'Customer Name', 'Customer Email', 
-            'Status', 'Payment Status', 'Subtotal', 'Tax', 'Shipping', 
-            'Discount', 'Total', 'Currency', 'Payment Method', 
-            'Vendor', 'Created At', 'Shipped At', 'Delivered At'
+            'Order ID', 'Order Number', 'Customer Name', 'Customer Email',
+            'Status', 'Payment Status', 'Subtotal', 'Tax', 'Shipping',
+            'Discount', 'Total', 'Currency', 'Payment Method',
+            'Vendor', 'Created At', 'Shipped At', 'Delivered At',
         ]);
 
         // Data
@@ -412,7 +412,7 @@ class AdminOrderController extends Controller
             fputcsv($handle, [
                 $order->id,
                 $order->order_number,
-                $order->customer_firstname . ' ' . $order->customer_lastname,
+                $order->customer_firstname.' '.$order->customer_lastname,
                 $order->customer_email,
                 $order->status,
                 $order->payment_status,
@@ -441,7 +441,7 @@ class AdminOrderController extends Controller
                 'content' => base64_encode($csvContent),
                 'mime_type' => 'text/csv',
                 'row_count' => $orders->count(),
-            ]
+            ],
         ]);
     }
 

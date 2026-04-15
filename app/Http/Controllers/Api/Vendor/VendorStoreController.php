@@ -4,17 +4,16 @@ namespace App\Http\Controllers\Api\Vendor;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\VendorStoreResource;
-use App\Models\Vendor\VendorStore;
 use App\Models\Config\Domain;
-use App\Models\Config\Theme;
 use App\Models\Config\SalesPolicy;
+use App\Models\Config\Theme;
 use App\Models\Review\Review;
+use App\Models\Vendor\VendorStore;
 use App\Services\Vendor\VendorService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
-
+use Illuminate\Support\Str;
 
 class VendorStoreController extends Controller
 {
@@ -44,7 +43,7 @@ class VendorStoreController extends Controller
                 'total' => $stores->count(),
                 'active_count' => $stores->where('status', 'active')->count(),
                 'inactive_count' => $stores->where('status', 'inactive')->count(),
-            ]
+            ],
         ]);
     }
 
@@ -57,6 +56,7 @@ class VendorStoreController extends Controller
 
         // Check plan limits
         if (!$vendor->canAddStore()) {
+
             return response()->json([
                 'success' => false,
                 'message' => 'Store limit reached for your plan. Maximum ' . $vendor->plan->max_stores . ' stores allowed.',
@@ -73,7 +73,6 @@ class VendorStoreController extends Controller
             'subdomain' => 'nullable|string|alpha_dash|min:3|max:50|unique:vendor_stores,subdomain',
             'description' => 'nullable|string|max:500',
         ]);
-
         DB::beginTransaction();
 
         try {
@@ -85,7 +84,7 @@ class VendorStoreController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Store created successfully',
-                'data' => new VendorStoreResource($store->load(['domain', 'theme']))
+                'data' => new VendorStoreResource($store->load(['domain', 'theme'])),
             ], 201);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -93,7 +92,7 @@ class VendorStoreController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create store',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -101,14 +100,25 @@ class VendorStoreController extends Controller
     /**
      * Get a specific store
      */
-    public function show(Request $request, $id)
+    public function show(Request $request, $uuid)
     {
         $vendor = $request->user()->vendor;
 
-        $store = VendorStore::where('vendor_id', $vendor->getKey())
-            ->with(['domain', 'theme', 'salesPolicy', 'products'])
-            ->findOrFail($id);
+        // $store = VendorStore::where('vendor_id', $vendor->getKey())
+        //     ->with(['domain', 'theme', 'salesPolicy', 'products'])
+        //     ->findOrFail($id);
 
+        $store = VendorStore::where('vendor_id', $vendor->getKey())
+            ->where('uuid', $uuid)  // Sirf UUID se search karo
+            ->with(['domain', 'theme', 'salesPolicy', 'products'])
+            ->first();
+
+        if (!$store) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Store not found with this UUID'
+            ], 404);
+        }
         // Get store statistics
         $stats = [
             'products_count' => $store->products()->count(),
@@ -123,7 +133,7 @@ class VendorStoreController extends Controller
             'data' => [
                 'store' => new VendorStoreResource($store),
                 'statistics' => $stats,
-            ]
+            ],
         ]);
     }
 
@@ -178,7 +188,7 @@ class VendorStoreController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Store updated successfully',
-                'data' => new VendorStoreResource($store->fresh())
+                'data' => new VendorStoreResource($store->fresh()),
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -186,7 +196,7 @@ class VendorStoreController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update store',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -203,7 +213,7 @@ class VendorStoreController extends Controller
             ->findOrFail($id);
 
         // Check if domain is verified if using custom domain
-        if ($store->domain_id && !$store->domain->dns_verified) {
+        if ($store->domain_id && ! $store->domain->dns_verified) {
             return response()->json([
                 'success' => false,
                 'message' => 'Domain must be verified before activating store',
@@ -224,7 +234,7 @@ class VendorStoreController extends Controller
                 'data' => [
                     'store_url' => $store->store_url,
                     'status' => $store->status,
-                ]
+                ],
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -232,7 +242,7 @@ class VendorStoreController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to activate store',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -260,7 +270,7 @@ class VendorStoreController extends Controller
                 'message' => 'Store deactivated successfully',
                 'data' => [
                     'status' => $store->status,
-                ]
+                ],
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -268,7 +278,7 @@ class VendorStoreController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to deactivate store',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -307,7 +317,7 @@ class VendorStoreController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Store deleted successfully'
+                'message' => 'Store deleted successfully',
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -315,7 +325,7 @@ class VendorStoreController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete store',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -340,11 +350,11 @@ class VendorStoreController extends Controller
         try {
             // If setting as primary, remove primary from other domains
             if ($request->is_primary) {
-                Domain::where('vendor_store_id', $store->uuid)->update(['is_primary' => false]);
+                Domain::where('vendor_store_id', $store->id)->update(['is_primary' => false]);
             }
 
             $domain = Domain::create([
-                'vendor_store_id' => $store->uuid,
+                'vendor_store_id' => $store->id,
                 'domain' => $request->domain,
                 'type' => 'vendor_custom',
                 'is_primary' => $request->is_primary ?? false,
@@ -353,7 +363,7 @@ class VendorStoreController extends Controller
                 'verification_token' => Str::random(32),
             ]);
 
-            if ($domain->is_primary || !$store->domain_id) {
+            if ($domain->is_primary || ! $store->domain_id) {
                 $store->forceFill(['domain_id' => $domain->id])->save();
             }
 
@@ -367,7 +377,7 @@ class VendorStoreController extends Controller
                     'domain' => $domain->domain,
                     'verification_records' => $this->getDnsVerificationRecords($domain),
                     'is_primary' => $domain->is_primary,
-                ]
+                ],
             ], 201);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -375,7 +385,7 @@ class VendorStoreController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to add domain',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -391,7 +401,7 @@ class VendorStoreController extends Controller
             ->findOrFail($id);
 
         $domain = Domain::where('id', $domainId)
-            ->where('vendor_store_id', $store->uuid)
+            ->where('vendor_store_id', $store->id)
             ->firstOrFail();
 
         DB::beginTransaction();
@@ -402,7 +412,7 @@ class VendorStoreController extends Controller
             $domain->delete();
 
             if ($wasPrimary) {
-                $replacement = Domain::where('vendor_store_id', $store->uuid)
+                $replacement = Domain::where('vendor_store_id', $store->id)
                     ->whereNull('deleted_at')
                     ->orderByDesc('is_primary')
                     ->orderBy('id')
@@ -438,7 +448,7 @@ class VendorStoreController extends Controller
         $store = VendorStore::where('vendor_id', $vendor->getKey())->findOrFail($storeId);
 
         $domain = Domain::where('id', $domainId)
-            ->where('vendor_store_id', $store->uuid)
+            ->where('vendor_store_id', $store->id)
             ->firstOrFail();
 
         DB::beginTransaction();
@@ -460,7 +470,7 @@ class VendorStoreController extends Controller
                     'dns_verified' => $domain->dns_verified,
                     'ssl_status' => $domain->ssl_status,
                     'can_activate' => $domain->dns_verified && $domain->ssl_status === 'active',
-                ]
+                ],
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -468,7 +478,7 @@ class VendorStoreController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to verify domain',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -493,7 +503,7 @@ class VendorStoreController extends Controller
                 'themes' => $themes,
                 'current_theme' => $currentTheme,
                 'is_premium_available' => $vendor->plan->getFeatureValue('premium_themes', false),
-            ]
+            ],
         ]);
     }
 
@@ -513,7 +523,7 @@ class VendorStoreController extends Controller
         $theme = Theme::find($request->theme_id);
 
         // Check if theme is premium and vendor has access
-        if ($theme->is_premium && !$vendor->plan->getFeatureValue('premium_themes', false)) {
+        if ($theme->is_premium && ! $vendor->plan->getFeatureValue('premium_themes', false)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Premium themes are not available on your current plan',
@@ -539,7 +549,7 @@ class VendorStoreController extends Controller
                 'data' => [
                     'theme' => $theme,
                     'preview_url' => $store->store_url . '?theme_preview=' . $theme->slug,
-                ]
+                ],
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -547,7 +557,7 @@ class VendorStoreController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to apply theme',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -567,7 +577,7 @@ class VendorStoreController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $policies
+            'data' => $policies,
         ]);
     }
 
@@ -591,16 +601,6 @@ class VendorStoreController extends Controller
             ],
         ];
     }
-
-
-
-
-
-
-
-
-
-
 
     /**
      * Public store information (no auth required)
@@ -644,7 +644,7 @@ class VendorStoreController extends Controller
                     'terms_of_service' => $store->salesPolicy->terms_of_service,
                     'privacy_policy' => $store->salesPolicy->privacy_policy,
                 ] : null,
-            ]
+            ],
         ]);
     }
 
@@ -659,7 +659,7 @@ class VendorStoreController extends Controller
             ->with(['theme', 'salesPolicy', 'domain'])
             ->firstOrFail();
 
-        $reviewQuery = Review::where('vendor_store_id', $store->uuid)
+        $reviewQuery = Review::where('vendor_store_id', $store->id)
             ->where('status', 'approved');
 
         // Get store statistics for public view
@@ -711,7 +711,7 @@ class VendorStoreController extends Controller
                 'featured_products' => $featuredProducts,
                 'categories' => $categories,
                 'policies' => $store->salesPolicy,
-            ]
+            ],
         ]);
     }
 
@@ -722,7 +722,7 @@ class VendorStoreController extends Controller
     {
         $store = VendorStore::find($storeId);
 
-        if (!$store) {
+        if (! $store) {
             return [];
         }
 

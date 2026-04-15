@@ -27,3 +27,4 @@ class OrderIntegrationController extends PlaceholderApiController
         return $this->notImplemented('Order integration shipment creation', ['id' => $id]);
     }
 }
+

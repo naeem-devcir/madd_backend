@@ -37,3 +37,4 @@ class AdminCourierController extends PlaceholderApiController
         return $this->notImplemented('Admin courier connection test', ['id' => $id]);
     }
 }
+

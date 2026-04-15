@@ -26,3 +26,4 @@ class CarrierWebhookController extends PlaceholderApiController
         return $this->notImplemented('DPD webhook handling');
     }
 }
+

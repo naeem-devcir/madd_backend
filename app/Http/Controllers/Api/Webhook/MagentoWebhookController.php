@@ -3,9 +3,9 @@
 namespace App\Http\Controllers\Api\Webhook;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\Inventory\UpdateInventoryFromMagento;
 use App\Jobs\Order\SyncOrderToLaravel;
 use App\Jobs\Product\SyncProductFromMagento;
-use App\Jobs\Inventory\UpdateInventoryFromMagento;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
@@ -17,8 +17,9 @@ class MagentoWebhookController extends Controller
     public function handleOrderCreated(Request $request)
     {
         // Verify webhook signature
-        if (!$this->verifySignature($request)) {
+        if (! $this->verifySignature($request)) {
             Log::warning('Invalid Magento webhook signature', ['payload' => $request->all()]);
+
             return response()->json(['error' => 'Invalid signature'], 401);
         }
 
@@ -36,7 +37,7 @@ class MagentoWebhookController extends Controller
      */
     public function handleOrderUpdated(Request $request)
     {
-        if (!$this->verifySignature($request)) {
+        if (! $this->verifySignature($request)) {
             return response()->json(['error' => 'Invalid signature'], 401);
         }
 
@@ -53,7 +54,7 @@ class MagentoWebhookController extends Controller
      */
     public function handleProductUpdated(Request $request)
     {
-        if (!$this->verifySignature($request)) {
+        if (! $this->verifySignature($request)) {
             return response()->json(['error' => 'Invalid signature'], 401);
         }
 
@@ -69,7 +70,7 @@ class MagentoWebhookController extends Controller
      */
     public function handleInventoryUpdated(Request $request)
     {
-        if (!$this->verifySignature($request)) {
+        if (! $this->verifySignature($request)) {
             return response()->json(['error' => 'Invalid signature'], 401);
         }
 
@@ -142,3 +143,4 @@ class MagentoWebhookController extends Controller
         ], 501);
     }
 }
+

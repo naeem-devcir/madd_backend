@@ -2,20 +2,22 @@
 
 namespace App\Models\Financial;
 
+use App\Models\Order\Order;
+use App\Models\Traits\HasUuid;
 use App\Models\User;
 use App\Models\Vendor\Vendor;
-use App\Models\Order\Order;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Transaction extends Model
 {
-    use HasFactory, SoftDeletes;
+    use HasFactory, HasUuid, SoftDeletes;
 
     protected $table = 'transactions';
 
     protected $fillable = [
+        'uuid',
         'settlement_id',
         'order_id',
         'vendor_id',
@@ -46,120 +48,33 @@ class Transaction extends Model
     ];
 
     public $timestamps = false;
-    
-    const CREATED_AT = 'created_at';
-    const UPDATED_AT = null;
 
-    // ========== Relationships ==========
-    
+    public const CREATED_AT = 'created_at';
+
+    public const UPDATED_AT = null;
+
     public function settlement()
     {
-        return $this->belongsTo(Settlement::class, 'settlement_id', 'uuid');
+        return $this->belongsTo(Settlement::class, 'settlement_id');
     }
-    
+
     public function order()
     {
-        return $this->belongsTo(Order::class, 'order_id', 'uuid');
+        return $this->belongsTo(Order::class, 'order_id');
     }
-    
+
     public function vendor()
     {
-        return $this->belongsTo(Vendor::class, 'vendor_id', 'uuid');
+        return $this->belongsTo(Vendor::class, 'vendor_id');
     }
-    
+
     public function initiatedBy()
     {
-        return $this->belongsTo(User::class, 'initiated_by', 'uuid');
+        return $this->belongsTo(User::class, 'initiated_by');
     }
-    
+
     public function payable()
     {
         return $this->morphTo();
-    }
-    
-    // ========== Scopes ==========
-    
-    public function scopeCompleted($query)
-    {
-        return $query->where('status', 'completed');
-    }
-    
-    public function scopePending($query)
-    {
-        return $query->where('status', 'pending');
-    }
-    
-    public function scopeFailed($query)
-    {
-        return $query->where('status', 'failed');
-    }
-    
-    public function scopeByType($query, $type)
-    {
-        return $query->where('type', $type);
-    }
-    
-    public function scopeByVendor($query, $vendorId)
-    {
-        return $query->where('vendor_id', $vendorId);
-    }
-    
-    public function scopeDateRange($query, $startDate, $endDate)
-    {
-        return $query->whereBetween('created_at', [$startDate, $endDate]);
-    }
-    
-    // ========== Accessors ==========
-    
-    public function getFormattedAmountAttribute(): string
-    {
-        $prefix = $this->amount < 0 ? '-' : '';
-        return $prefix . $this->currency_code . ' ' . number_format(abs($this->amount), 2);
-    }
-    
-    public function getIsCreditAttribute(): bool
-    {
-        return $this->amount > 0;
-    }
-    
-    public function getIsDebitAttribute(): bool
-    {
-        return $this->amount < 0;
-    }
-    
-    public function getTypeLabelAttribute(): string
-    {
-        $labels = [
-            'sale' => 'Sale',
-            'refund' => 'Refund',
-            'commission' => 'Commission',
-            'adjustment' => 'Adjustment',
-            'payout' => 'Payout',
-        ];
-        
-        return $labels[$this->type] ?? ucfirst($this->type);
-    }
-    
-    // ========== Methods ==========
-    
-    public function markAsCompleted(): void
-    {
-        $this->status = 'completed';
-        $this->processed_at = now();
-        $this->save();
-    }
-    
-    public function markAsFailed(string $reason): void
-    {
-        $this->status = 'failed';
-        $this->failure_reason = $reason;
-        $this->processed_at = now();
-        $this->save();
-    }
-    
-    public function markAsReversed(): void
-    {
-        $this->status = 'reversed';
-        $this->save();
     }
 }

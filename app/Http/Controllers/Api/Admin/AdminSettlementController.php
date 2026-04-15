@@ -3,8 +3,9 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Models\Financial\Settlement;
+use App\Jobs\Settlement\GenerateSettlementStatement;
 use App\Models\Financial\Payout;
+use App\Models\Financial\Settlement;
 use App\Models\Vendor\Vendor;
 use App\Services\Vendor\SettlementService;
 use Illuminate\Http\Request;
@@ -44,9 +45,9 @@ class AdminSettlementController extends Controller
         }
 
         if ($request->has('search')) {
-            $query->whereHas('vendor', function($q) use ($request) {
-                $q->where('company_name', 'like', '%' . $request->search . '%')
-                  ->orWhere('company_slug', 'like', '%' . $request->search . '%');
+            $query->whereHas('vendor', function ($q) use ($request) {
+                $q->where('company_name', 'like', '%'.$request->search.'%')
+                    ->orWhere('company_slug', 'like', '%'.$request->search.'%');
             });
         }
 
@@ -72,7 +73,7 @@ class AdminSettlementController extends Controller
                 'current_page' => $settlements->currentPage(),
                 'last_page' => $settlements->lastPage(),
                 'total' => $settlements->total(),
-            ]
+            ],
         ]);
     }
 
@@ -82,14 +83,14 @@ class AdminSettlementController extends Controller
     public function show($id)
     {
         $settlement = Settlement::with([
-            'vendor', 
-            'vendor.user', 
-            'transactions', 
+            'vendor',
+            'vendor.user',
+            'transactions',
             'transactions.order',
             'orders',
             'payout',
             'approvedBy',
-            'maddCompany'
+            'maddCompany',
         ])->findOrFail($id);
 
         // Get transaction summary
@@ -108,7 +109,7 @@ class AdminSettlementController extends Controller
                 'transaction_summary' => $transactionSummary,
                 'orders_count' => $settlement->orders()->count(),
                 'total_orders_value' => $settlement->orders()->sum('grand_total'),
-            ]
+            ],
         ]);
     }
 
@@ -149,6 +150,7 @@ class AdminSettlementController extends Controller
 
                 if ($existing) {
                     $errors[] = "Settlement for {$vendor->company_name} already exists for this period";
+
                     continue;
                 }
 
@@ -176,7 +178,7 @@ class AdminSettlementController extends Controller
                     'errors' => $errors,
                     'period_start' => $periodStart,
                     'period_end' => $periodEnd,
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
@@ -185,7 +187,7 @@ class AdminSettlementController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to generate settlements',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -204,7 +206,7 @@ class AdminSettlementController extends Controller
         if ($settlement->status !== 'pending') {
             return response()->json([
                 'success' => false,
-                'message' => 'Settlement is not pending approval'
+                'message' => 'Settlement is not pending approval',
             ], 422);
         }
 
@@ -223,7 +225,7 @@ class AdminSettlementController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Settlement approved successfully',
-                'data' => $settlement
+                'data' => $settlement,
             ]);
 
         } catch (\Exception $e) {
@@ -232,7 +234,7 @@ class AdminSettlementController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to approve settlement',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -253,7 +255,7 @@ class AdminSettlementController extends Controller
         if ($settlement->status !== 'approved') {
             return response()->json([
                 'success' => false,
-                'message' => 'Settlement must be approved before marking as paid'
+                'message' => 'Settlement must be approved before marking as paid',
             ], 422);
         }
 
@@ -266,7 +268,7 @@ class AdminSettlementController extends Controller
             );
 
             if ($request->notes) {
-                $settlement->notes = ($settlement->notes ? $settlement->notes . "\n" : '') . $request->notes;
+                $settlement->notes = ($settlement->notes ? $settlement->notes."\n" : '').$request->notes;
                 $settlement->save();
             }
 
@@ -275,7 +277,7 @@ class AdminSettlementController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Settlement marked as paid successfully',
-                'data' => $settlement
+                'data' => $settlement,
             ]);
 
         } catch (\Exception $e) {
@@ -284,7 +286,7 @@ class AdminSettlementController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to mark settlement as paid',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -310,7 +312,7 @@ class AdminSettlementController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Settlement marked as disputed',
-                'data' => $settlement
+                'data' => $settlement,
             ]);
 
         } catch (\Exception $e) {
@@ -319,7 +321,7 @@ class AdminSettlementController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to mark settlement as disputed',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -334,7 +336,7 @@ class AdminSettlementController extends Controller
         if ($settlement->status === 'paid') {
             return response()->json([
                 'success' => false,
-                'message' => 'Cannot recalculate a paid settlement'
+                'message' => 'Cannot recalculate a paid settlement',
             ], 422);
         }
 
@@ -355,7 +357,7 @@ class AdminSettlementController extends Controller
                     'old_amount' => $oldAmount,
                     'new_amount' => $newAmount,
                     'difference' => $newAmount - $oldAmount,
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
@@ -364,7 +366,7 @@ class AdminSettlementController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to recalculate settlement',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -376,16 +378,16 @@ class AdminSettlementController extends Controller
     {
         $settlement = Settlement::findOrFail($id);
 
-        if (!$settlement->statement_pdf_path) {
+        if (! $settlement->statement_pdf_path) {
             // Generate statement if not exists
-            \App\Jobs\Settlement\GenerateSettlementStatement::dispatchSync($settlement);
+            GenerateSettlementStatement::dispatchSync($settlement);
             $settlement->refresh();
         }
 
-        if (!$settlement->statement_pdf_path) {
+        if (! $settlement->statement_pdf_path) {
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to generate settlement statement'
+                'message' => 'Failed to generate settlement statement',
             ], 500);
         }
 
@@ -398,8 +400,8 @@ class AdminSettlementController extends Controller
             'success' => true,
             'data' => [
                 'download_url' => $url,
-                'filename' => 'settlement_' . $settlement->settlement_number . '.pdf',
-            ]
+                'filename' => 'settlement_'.$settlement->settlement_number.'.pdf',
+            ],
         ]);
     }
 
@@ -409,7 +411,7 @@ class AdminSettlementController extends Controller
     public function statistics(Request $request)
     {
         $period = $request->get('period', 'month');
-        $startDate = match($period) {
+        $startDate = match ($period) {
             'week' => now()->subWeek(),
             'month' => now()->subMonth(),
             'quarter' => now()->subQuarter(),
@@ -450,7 +452,7 @@ class AdminSettlementController extends Controller
             'meta' => [
                 'period' => $period,
                 'start_date' => $startDate->toDateString(),
-            ]
+            ],
         ]);
     }
 
@@ -475,7 +477,7 @@ class AdminSettlementController extends Controller
 
         $settlements = $query->get();
 
-        $filename = 'settlements_export_' . date('Y-m-d_His') . '.csv';
+        $filename = 'settlements_export_'.date('Y-m-d_His').'.csv';
         $handle = fopen('php://temp', 'w');
 
         // Headers
@@ -484,7 +486,7 @@ class AdminSettlementController extends Controller
             'Gross Sales', 'Refunds', 'Commissions', 'Shipping Fees',
             'Tax Collected', 'Gateway Fees', 'Adjustments', 'Net Payout',
             'Currency', 'Status', 'Payment Method', 'Payment Reference',
-            'Approved By', 'Approved At', 'Paid At', 'Created At'
+            'Approved By', 'Approved At', 'Paid At', 'Created At',
         ]);
 
         // Data
@@ -524,7 +526,7 @@ class AdminSettlementController extends Controller
                 'content' => base64_encode($csvContent),
                 'mime_type' => 'text/csv',
                 'row_count' => $settlements->count(),
-            ]
+            ],
         ]);
     }
 
@@ -551,3 +553,4 @@ class AdminSettlementController extends Controller
         ], 501);
     }
 }
+

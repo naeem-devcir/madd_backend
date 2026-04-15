@@ -11,8 +11,9 @@ abstract class PlaceholderApiController extends Controller
     {
         return response()->json([
             'success' => false,
-            'message' => $feature . ' is not implemented yet.',
+            'message' => $feature.' is not implemented yet.',
             'context' => $context,
         ], 501);
     }
 }
+

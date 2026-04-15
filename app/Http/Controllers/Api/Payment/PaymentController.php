@@ -3,12 +3,12 @@
 namespace App\Http\Controllers\Api\Payment;
 
 use App\Http\Controllers\Controller;
-use App\Models\Order\Order;
 use App\Models\Financial\PaymentTransaction;
 use App\Models\Financial\Refund;
+use App\Models\Order\Order;
 use App\Services\Payment\PaymentService;
-use App\Services\Payment\StripeService;
 use App\Services\Payment\PayPalService;
+use App\Services\Payment\StripeService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -16,7 +16,9 @@ use Illuminate\Support\Facades\Validator;
 class PaymentController extends Controller
 {
     protected $paymentService;
+
     protected $stripeService;
+
     protected $payPalService;
 
     public function __construct(
@@ -43,7 +45,7 @@ class PaymentController extends Controller
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
@@ -53,7 +55,7 @@ class PaymentController extends Controller
         if ($order->payment_status === 'paid') {
             return response()->json([
                 'success' => false,
-                'message' => 'Order already paid'
+                'message' => 'Order already paid',
             ], 422);
         }
 
@@ -69,14 +71,14 @@ class PaymentController extends Controller
                     'currency' => $order->currency_code,
                     'payment_method' => $request->payment_method,
                     'status' => $paymentIntent['status'],
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create payment intent',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -94,7 +96,7 @@ class PaymentController extends Controller
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
@@ -112,7 +114,7 @@ class PaymentController extends Controller
                         'order_number' => $order->order_number,
                         'payment_status' => $order->payment_status,
                         'transaction_id' => $result['transaction_id'] ?? null,
-                    ]
+                    ],
                 ]);
             } else {
                 return response()->json([
@@ -125,7 +127,7 @@ class PaymentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to confirm payment',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -155,7 +157,7 @@ class PaymentController extends Controller
                     'amount' => $paymentTransaction->amount,
                     'created_at' => $paymentTransaction->created_at->toIso8601String(),
                 ] : null,
-            ]
+            ],
         ]);
     }
 
@@ -172,16 +174,16 @@ class PaymentController extends Controller
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
         $order = Order::findOrFail($orderId);
 
-        if (!$order->canBeRefunded()) {
+        if (! $order->canBeRefunded()) {
             return response()->json([
                 'success' => false,
-                'message' => 'Order cannot be refunded'
+                'message' => 'Order cannot be refunded',
             ], 422);
         }
 
@@ -195,7 +197,7 @@ class PaymentController extends Controller
                 'data' => [
                     'max_refund' => $maxRefund,
                     'requested' => $refundAmount,
-                ]
+                ],
             ], 422);
         }
 
@@ -206,7 +208,7 @@ class PaymentController extends Controller
                 ->where('status', 'captured')
                 ->first();
 
-            if (!$paymentTransaction) {
+            if (! $paymentTransaction) {
                 throw new \Exception('No captured payment found for this order');
             }
 
@@ -222,7 +224,7 @@ class PaymentController extends Controller
                     'amount' => $refund->refund_amount,
                     'status' => $refund->status,
                     'transaction_id' => $refund->gateway_refund_id,
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
@@ -231,7 +233,7 @@ class PaymentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to process refund',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -242,12 +244,12 @@ class PaymentController extends Controller
     public function methods(Request $request)
     {
         $countryCode = $request->get('country_code', 'DE');
-        
+
         $paymentMethods = $this->paymentService->getAvailablePaymentMethods($countryCode);
 
         return response()->json([
             'success' => true,
-            'data' => $paymentMethods
+            'data' => $paymentMethods,
         ]);
     }
 
@@ -264,7 +266,7 @@ class PaymentController extends Controller
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
@@ -276,14 +278,14 @@ class PaymentController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Payment method saved successfully',
-                'data' => $savedMethod
+                'data' => $savedMethod,
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to save payment method',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -294,12 +296,12 @@ class PaymentController extends Controller
     public function getSavedMethods()
     {
         $user = auth()->user();
-        
+
         $methods = $this->paymentService->getSavedPaymentMethods($user);
 
         return response()->json([
             'success' => true,
-            'data' => $methods
+            'data' => $methods,
         ]);
     }
 
@@ -315,14 +317,14 @@ class PaymentController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Payment method deleted successfully'
+                'message' => 'Payment method deleted successfully',
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete payment method',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -336,10 +338,10 @@ class PaymentController extends Controller
 
         // Check permission
         $user = auth()->user();
-        if (!$user->is_admin && $transaction->order->customer_id !== $user->uuid) {
+        if (! $user->is_admin && $transaction->order->customer_id !== $user->id) {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthorized'
+                'message' => 'Unauthorized',
             ], 403);
         }
 
@@ -360,7 +362,7 @@ class PaymentController extends Controller
                     'id' => $transaction->order->id,
                     'number' => $transaction->order->order_number,
                 ],
-            ]
+            ],
         ]);
     }
 
@@ -394,7 +396,7 @@ class PaymentController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $stats
+            'data' => $stats,
         ]);
     }
 }

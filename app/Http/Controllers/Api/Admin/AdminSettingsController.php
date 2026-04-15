@@ -6,9 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Config\CountryConfig;
 use App\Models\Config\Currency;
 use App\Models\Config\Language;
-use App\Models\Config\SalesPolicy;
 use App\Models\Config\MaddCompany;
-use App\Models\Config\Courier;
 use App\Models\Vendor\VendorPlan;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -36,13 +34,13 @@ class AdminSettingsController extends Controller
         if ($group && isset($settings[$group])) {
             return response()->json([
                 'success' => true,
-                'data' => $settings[$group]
+                'data' => $settings[$group],
             ]);
         }
 
         return response()->json([
             'success' => true,
-            'data' => $settings
+            'data' => $settings,
         ]);
     }
 
@@ -74,7 +72,7 @@ class AdminSettingsController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'General settings updated successfully',
-            'data' => $validated
+            'data' => $validated,
         ]);
     }
 
@@ -107,7 +105,7 @@ class AdminSettingsController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Payment settings updated successfully',
-            'data' => $validated
+            'data' => $validated,
         ]);
     }
 
@@ -132,7 +130,7 @@ class AdminSettingsController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Shipping settings updated successfully',
-            'data' => $validated
+            'data' => $validated,
         ]);
     }
 
@@ -158,7 +156,7 @@ class AdminSettingsController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Tax settings updated successfully',
-            'data' => $validated
+            'data' => $validated,
         ]);
     }
 
@@ -188,7 +186,7 @@ class AdminSettingsController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Email settings updated successfully',
-            'data' => $validated
+            'data' => $validated,
         ]);
     }
 
@@ -214,7 +212,7 @@ class AdminSettingsController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'API settings updated successfully',
-            'data' => $validated
+            'data' => $validated,
         ]);
     }
 
@@ -242,7 +240,7 @@ class AdminSettingsController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Security settings updated successfully',
-            'data' => $validated
+            'data' => $validated,
         ]);
     }
 
@@ -257,7 +255,7 @@ class AdminSettingsController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $countries
+            'data' => $countries,
         ]);
     }
 
@@ -285,7 +283,7 @@ class AdminSettingsController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Country updated successfully',
-            'data' => $country
+            'data' => $country,
         ]);
     }
 
@@ -298,7 +296,7 @@ class AdminSettingsController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $currencies
+            'data' => $currencies,
         ]);
     }
 
@@ -318,7 +316,7 @@ class AdminSettingsController extends Controller
         try {
             foreach ($request->rates as $rate) {
                 Currency::where('code', $rate['code'])->update([
-                    'exchange_rate' => $rate['exchange_rate']
+                    'exchange_rate' => $rate['exchange_rate'],
                 ]);
             }
 
@@ -328,7 +326,7 @@ class AdminSettingsController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Exchange rates updated successfully'
+                'message' => 'Exchange rates updated successfully',
             ]);
 
         } catch (\Exception $e) {
@@ -337,7 +335,7 @@ class AdminSettingsController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update exchange rates',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -351,7 +349,7 @@ class AdminSettingsController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $languages
+            'data' => $languages,
         ]);
     }
 
@@ -366,7 +364,7 @@ class AdminSettingsController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $companies
+            'data' => $companies,
         ]);
     }
 
@@ -395,7 +393,7 @@ class AdminSettingsController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'MADD company created successfully',
-            'data' => $company
+            'data' => $company,
         ], 201);
     }
 
@@ -408,7 +406,7 @@ class AdminSettingsController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $plans
+            'data' => $plans,
         ]);
     }
 
@@ -444,7 +442,7 @@ class AdminSettingsController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Vendor plan created successfully',
-            'data' => $plan
+            'data' => $plan,
         ], 201);
     }
 
@@ -457,7 +455,7 @@ class AdminSettingsController extends Controller
 
         $validated = $request->validate([
             'name' => 'sometimes|string|max:100',
-            'slug' => 'sometimes|string|max:100|unique:vendor_plans,slug,' . $plan->id,
+            'slug' => 'sometimes|string|max:100|unique:vendor_plans,slug,'.$plan->id,
             'description' => 'nullable|string',
             'price_monthly' => 'sometimes|numeric|min:0',
             'price_yearly' => 'sometimes|numeric|min:0',
@@ -482,7 +480,7 @@ class AdminSettingsController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Vendor plan updated successfully',
-            'data' => $plan
+            'data' => $plan,
         ]);
     }
 
@@ -497,7 +495,7 @@ class AdminSettingsController extends Controller
         if ($plan->vendors()->count() > 0) {
             return response()->json([
                 'success' => false,
-                'message' => 'Cannot delete plan that has active vendors'
+                'message' => 'Cannot delete plan that has active vendors',
             ], 422);
         }
 
@@ -505,7 +503,7 @@ class AdminSettingsController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Vendor plan deleted successfully'
+            'message' => 'Vendor plan deleted successfully',
         ]);
     }
 
@@ -518,7 +516,7 @@ class AdminSettingsController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'System cache cleared successfully'
+            'message' => 'System cache cleared successfully',
         ]);
     }
 
@@ -545,7 +543,7 @@ class AdminSettingsController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $info
+            'data' => $info,
         ]);
     }
 
@@ -647,6 +645,7 @@ class AdminSettingsController extends Controller
         try {
             $redis = app('redis')->connection();
             $info = $redis->info('server');
+
             return $info['redis_version'] ?? 'Unknown';
         } catch (\Exception $e) {
             return 'Not connected';
@@ -707,3 +706,4 @@ class AdminSettingsController extends Controller
         ]);
     }
 }
+

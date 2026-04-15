@@ -23,20 +23,20 @@ class CreateOrderRequest extends FormRequest
         $rules = [
             // Store Information
             'vendor_store_id' => 'required|exists:vendor_stores,id',
-            
+
             // Customer Information
             'customer_email' => 'required|email',
             'customer_firstname' => 'required|string|max:100',
             'customer_lastname' => 'required|string|max:100',
             'customer_phone' => 'nullable|string|max:20',
-            
+
             // Cart Items
             'items' => 'required|array|min:1',
             'items.*.product_id' => 'required|exists:vendor_products,id',
             'items.*.sku' => 'required|string|max:255',
             'items.*.quantity' => 'required|integer|min:1',
             'items.*.unit_price' => 'required|numeric|min:0',
-            
+
             // Shipping Address
             'shipping_address' => 'required|array',
             'shipping_address.street' => 'required|string',
@@ -45,31 +45,31 @@ class CreateOrderRequest extends FormRequest
             'shipping_address.country_id' => 'required|string|size:2',
             'shipping_address.firstname' => 'required|string|max:100',
             'shipping_address.lastname' => 'required|string|max:100',
-            
+
             // Billing Address
             'billing_address' => 'sometimes|array',
             'billing_address.street' => 'required_with:billing_address|string',
             'billing_address.city' => 'required_with:billing_address|string|max:100',
             'billing_address.postcode' => 'required_with:billing_address|string|max:20',
             'billing_address.country_id' => 'required_with:billing_address|string|size:2',
-            
+
             // Payment & Shipping
             'payment_method' => 'required|string|in:stripe,paypal,credit_card,bank_transfer',
             'shipping_method' => 'required|string|max:100',
-            
+
             // Coupon
             'coupon_code' => 'nullable|string|max:50|exists:coupons,code',
-            
+
             // Customer Notes
             'customer_note' => 'nullable|string|max:1000',
-            
+
             // Terms & Conditions
             'terms_accepted' => 'accepted',
             'privacy_accepted' => 'accepted',
         ];
 
         // For guest checkout, add guest token
-        if (!$this->user()) {
+        if (! $this->user()) {
             $rules['guest_token'] = 'required|string|min:32';
         }
 
@@ -109,7 +109,7 @@ class CreateOrderRequest extends FormRequest
         }
 
         // Set billing address same as shipping if not provided
-        if (!$this->has('billing_address') && $this->has('shipping_address')) {
+        if (! $this->has('billing_address') && $this->has('shipping_address')) {
             $this->merge([
                 'billing_address' => $this->shipping_address,
             ]);

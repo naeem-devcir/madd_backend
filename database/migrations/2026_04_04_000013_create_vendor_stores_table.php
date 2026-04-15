@@ -11,10 +11,10 @@ return new class extends Migration
         Schema::create('vendor_stores', function (Blueprint $table) {
             $table->id();
             $table->uuid('uuid')->unique();
-            
+
             // foreignUuid: FK references uuid
-            $table->foreignUuid('vendor_id')->references('uuid')->on('vendors')->cascadeOnDelete();
-            
+            $table->foreignId('vendor_id')->constrained('vendors')->cascadeOnDelete();
+
             $table->string('store_name');
             $table->string('store_slug');
             $table->char('country_code', 2)->index();
@@ -53,7 +53,7 @@ return new class extends Migration
             $table->timestamp('activated_at')->nullable();
             $table->timestamps();
             $table->softDeletes();
-            
+
             // Indexes
             $table->unique(['vendor_id', 'store_slug']);
             $table->index(['status', 'country_code']);

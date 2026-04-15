@@ -3,15 +3,11 @@
 namespace App\Http\Controllers\Api\Auth;
 
 use App\Http\Controllers\Controller;
-use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Password;
-use Illuminate\Validation\ValidationException;
-use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Log;
-
+use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Validation\ValidationException;
 
 class PasswordResetController extends Controller
 {
@@ -46,15 +42,16 @@ class PasswordResetController extends Controller
         $request->validate(['email' => 'required|email|exists:users,email']);
         Log::info('User logged in.');
         $email = $request->email;
-        $key = 'password-reset:' . $email;
+        $key = 'password-reset:'.$email;
 
         // Check if exceeded 5 attempts in 24 hours
         if (RateLimiter::tooManyAttempts($key, 50)) {
             $seconds = RateLimiter::availableIn($key);
+
             return response()->json([
                 'success' => false,
-                'message' => "Too many attempts. Try again in " . ceil($seconds / 60) . " minutes.",
-                'retry_after' => $seconds
+                'message' => 'Too many attempts. Try again in '.ceil($seconds / 60).' minutes.',
+                'retry_after' => $seconds,
             ], 429);
         }
 
@@ -65,14 +62,12 @@ class PasswordResetController extends Controller
 
         if ($status === Password::RESET_LINK_SENT) {
             RateLimiter::clear($key); // Clear on success
+
             return response()->json(['success' => true, 'message' => 'Reset link sent']);
         }
 
         return response()->json(['success' => false, 'message' => trans($status)], 400);
     }
-
-
-
 
     /**
      * Reset password
@@ -99,13 +94,14 @@ class PasswordResetController extends Controller
         if ($status === Password::PASSWORD_RESET) {
             return response()->json([
                 'success' => true,
-                'message' => 'Password reset successful'
+                'message' => 'Password reset successful',
             ]);
         }
 
         return response()->json([
             'success' => false,
-            'message' => trans($status)
+            'message' => trans($status),
         ], 400);
     }
 }
+

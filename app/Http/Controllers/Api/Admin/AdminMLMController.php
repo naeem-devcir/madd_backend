@@ -6,14 +6,15 @@ use App\Http\Controllers\Controller;
 use App\Models\Mlm\MlmAgent;
 use App\Models\Mlm\MlmCommission;
 use App\Models\User;
-use App\Services\Mlm\MlmService;
 use App\Services\Mlm\CommissionCalculator;
+use App\Services\Mlm\MlmService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class AdminMLMController extends Controller
 {
     protected $mlmService;
+
     protected $commissionCalculator;
 
     public function __construct(MlmService $mlmService, CommissionCalculator $commissionCalculator)
@@ -51,10 +52,10 @@ class AdminMLMController extends Controller
         }
 
         if ($request->has('search')) {
-            $query->whereHas('user', function($q) use ($request) {
-                $q->where('email', 'like', '%' . $request->search . '%')
-                  ->orWhere('first_name', 'like', '%' . $request->search . '%')
-                  ->orWhere('last_name', 'like', '%' . $request->search . '%');
+            $query->whereHas('user', function ($q) use ($request) {
+                $q->where('email', 'like', '%'.$request->search.'%')
+                    ->orWhere('first_name', 'like', '%'.$request->search.'%')
+                    ->orWhere('last_name', 'like', '%'.$request->search.'%');
             });
         }
 
@@ -75,7 +76,7 @@ class AdminMLMController extends Controller
                 'current_page' => $agents->currentPage(),
                 'last_page' => $agents->lastPage(),
                 'total' => $agents->total(),
-            ]
+            ],
         ]);
     }
 
@@ -124,7 +125,7 @@ class AdminMLMController extends Controller
                     ->latest()
                     ->limit(20)
                     ->get(),
-            ]
+            ],
         ]);
     }
 
@@ -146,7 +147,7 @@ class AdminMLMController extends Controller
 
         try {
             $user = User::find($validated['user_id']);
-            
+
             // Update user type
             $user->user_type = 'mlm_agent';
             $user->save();
@@ -178,7 +179,7 @@ class AdminMLMController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'MLM agent created successfully',
-                'data' => $agent->load(['user', 'parent'])
+                'data' => $agent->load(['user', 'parent']),
             ], 201);
 
         } catch (\Exception $e) {
@@ -187,7 +188,7 @@ class AdminMLMController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create MLM agent',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -216,7 +217,7 @@ class AdminMLMController extends Controller
             if (isset($validated['parent_id']) && $validated['parent_id'] !== $agent->parent_id) {
                 $parent = MlmAgent::find($validated['parent_id']);
                 $validated['level'] = $parent ? $parent->level + 1 : 1;
-                
+
                 // Update all downline levels
                 $this->mlmService->updateDownlineLevels($agent, $validated['level']);
             }
@@ -228,7 +229,7 @@ class AdminMLMController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'MLM agent updated successfully',
-                'data' => $agent->fresh()
+                'data' => $agent->fresh(),
             ]);
 
         } catch (\Exception $e) {
@@ -237,7 +238,7 @@ class AdminMLMController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update MLM agent',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -253,7 +254,7 @@ class AdminMLMController extends Controller
         if ($agent->children()->count() > 0) {
             return response()->json([
                 'success' => false,
-                'message' => 'Cannot delete agent with downline members. Reassign or suspend instead.'
+                'message' => 'Cannot delete agent with downline members. Reassign or suspend instead.',
             ], 422);
         }
 
@@ -270,7 +271,7 @@ class AdminMLMController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'MLM agent deleted successfully'
+                'message' => 'MLM agent deleted successfully',
             ]);
 
         } catch (\Exception $e) {
@@ -279,7 +280,7 @@ class AdminMLMController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete MLM agent',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -330,7 +331,7 @@ class AdminMLMController extends Controller
                 'current_page' => $commissions->currentPage(),
                 'last_page' => $commissions->lastPage(),
                 'total' => $commissions->total(),
-            ]
+            ],
         ]);
     }
 
@@ -362,7 +363,7 @@ class AdminMLMController extends Controller
                     'total_amount' => $result['total_amount'],
                     'period_start' => $request->period_start,
                     'period_end' => $request->period_end,
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
@@ -371,7 +372,7 @@ class AdminMLMController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to process commissions',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -386,7 +387,7 @@ class AdminMLMController extends Controller
         if ($commission->status !== 'pending') {
             return response()->json([
                 'success' => false,
-                'message' => 'Commission is not pending approval'
+                'message' => 'Commission is not pending approval',
             ], 422);
         }
 
@@ -395,7 +396,7 @@ class AdminMLMController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Commission approved',
-            'data' => $commission
+            'data' => $commission,
         ]);
     }
 
@@ -413,7 +414,7 @@ class AdminMLMController extends Controller
         if ($commission->status !== 'pending') {
             return response()->json([
                 'success' => false,
-                'message' => 'Commission is not pending approval'
+                'message' => 'Commission is not pending approval',
             ], 422);
         }
 
@@ -422,7 +423,7 @@ class AdminMLMController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Commission rejected',
-            'data' => $commission
+            'data' => $commission,
         ]);
     }
 
@@ -442,7 +443,7 @@ class AdminMLMController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $tree
+            'data' => $tree,
         ]);
     }
 
@@ -481,7 +482,7 @@ class AdminMLMController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $stats
+            'data' => $stats,
         ]);
     }
 
@@ -546,3 +547,4 @@ class AdminMLMController extends Controller
         ], 501);
     }
 }
+

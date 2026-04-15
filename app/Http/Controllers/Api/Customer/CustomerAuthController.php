@@ -7,18 +7,19 @@ use App\Http\Requests\Api\Auth\LoginRequest;
 use App\Http\Requests\Api\Auth\RegisterRequest;
 use App\Http\Resources\UserResource;
 use App\Models\User;
-use App\Models\Vendor\Vendor;
-use App\Services\Auth\TokenService;
 use App\Services\Auth\SocialAuthService;
+use App\Services\Auth\TokenService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Validation\ValidationException;
+use Laravel\Socialite\Facades\Socialite;
 
 class CustomerAuthController extends Controller
 {
     protected $tokenService;
+
     protected $socialAuthService;
 
     public function __construct(TokenService $tokenService, SocialAuthService $socialAuthService)
@@ -75,7 +76,7 @@ class CustomerAuthController extends Controller
                     'refresh_token' => $tokens['refresh_token'],
                     'token_type' => 'Bearer',
                     'expires_in' => $tokens['expires_in'],
-                ]
+                ],
             ], 201);
 
         } catch (\Exception $e) {
@@ -84,7 +85,7 @@ class CustomerAuthController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Registration failed',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -99,17 +100,17 @@ class CustomerAuthController extends Controller
         // Find user
         $user = User::where('email', $validated['email'])->first();
 
-        if (!$user || !Hash::check($validated['password'], $user->password)) {
+        if (! $user || ! Hash::check($validated['password'], $user->password)) {
             throw ValidationException::withMessages([
                 'email' => ['The provided credentials are incorrect.'],
             ]);
         }
 
         // Check if user is a customer
-        if (!$user->is_customer && !$user->hasRole('customer')) {
+        if (! $user->is_customer && ! $user->hasRole('customer')) {
             return response()->json([
                 'success' => false,
-                'message' => 'This account is not a customer account. Please use the correct login portal.'
+                'message' => 'This account is not a customer account. Please use the correct login portal.',
             ], 403);
         }
 
@@ -123,7 +124,7 @@ class CustomerAuthController extends Controller
         }
 
         // Check if email is verified
-        if (!$user->is_email_verified && !($validated['bypass_verification'] ?? false)) {
+        if (! $user->is_email_verified && ! ($validated['bypass_verification'] ?? false)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Please verify your email address first.',
@@ -174,7 +175,7 @@ class CustomerAuthController extends Controller
                 'token_type' => 'Bearer',
                 'expires_in' => $tokens['expires_in'],
                 'permissions' => $user->getPermissionArray(),
-            ]
+            ],
         ]);
     }
 
@@ -214,7 +215,7 @@ class CustomerAuthController extends Controller
                     'token_type' => 'Bearer',
                     'expires_in' => $tokens['expires_in'],
                     'is_new_user' => $user->wasRecentlyCreated,
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
@@ -223,7 +224,7 @@ class CustomerAuthController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Social login failed',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -243,7 +244,7 @@ class CustomerAuthController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Logged out successfully'
+            'message' => 'Logged out successfully',
         ]);
     }
 
@@ -258,7 +259,7 @@ class CustomerAuthController extends Controller
 
         $tokens = $this->tokenService->refreshTokens($request->refresh_token);
 
-        if (!$tokens) {
+        if (! $tokens) {
             return response()->json([
                 'success' => false,
                 'message' => 'Invalid or expired refresh token',
@@ -272,7 +273,7 @@ class CustomerAuthController extends Controller
                 'refresh_token' => $tokens['refresh_token'],
                 'token_type' => 'Bearer',
                 'expires_in' => $tokens['expires_in'],
-            ]
+            ],
         ]);
     }
 
@@ -288,10 +289,10 @@ class CustomerAuthController extends Controller
         $user = User::where('email', $request->email)->first();
 
         // Only allow password reset for customer accounts
-        if (!$user->is_customer) {
+        if (! $user->is_customer) {
             return response()->json([
                 'success' => false,
-                'message' => 'Password reset not available for this account type.'
+                'message' => 'Password reset not available for this account type.',
             ], 400);
         }
 
@@ -302,13 +303,13 @@ class CustomerAuthController extends Controller
         if ($status === Password::RESET_LINK_SENT) {
             return response()->json([
                 'success' => true,
-                'message' => 'Password reset link sent to your email'
+                'message' => 'Password reset link sent to your email',
             ]);
         }
 
         return response()->json([
             'success' => false,
-            'message' => 'Unable to send reset link'
+            'message' => 'Unable to send reset link',
         ], 400);
     }
 
@@ -337,13 +338,13 @@ class CustomerAuthController extends Controller
         if ($status === Password::PASSWORD_RESET) {
             return response()->json([
                 'success' => true,
-                'message' => 'Password reset successful. Please login with your new password.'
+                'message' => 'Password reset successful. Please login with your new password.',
             ]);
         }
 
         return response()->json([
             'success' => false,
-            'message' => 'Password reset failed. Please try again.'
+            'message' => 'Password reset failed. Please try again.',
         ], 400);
     }
 
@@ -361,7 +362,7 @@ class CustomerAuthController extends Controller
         if ($user->hasVerifiedEmail()) {
             return response()->json([
                 'success' => false,
-                'message' => 'Email already verified'
+                'message' => 'Email already verified',
             ], 400);
         }
 
@@ -369,7 +370,7 @@ class CustomerAuthController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Verification email sent'
+            'message' => 'Verification email sent',
         ]);
     }
 
@@ -380,17 +381,17 @@ class CustomerAuthController extends Controller
     {
         $user = User::findOrFail($id);
 
-        if (!hash_equals((string) $hash, sha1($user->getEmailForVerification()))) {
+        if (! hash_equals((string) $hash, sha1($user->getEmailForVerification()))) {
             return response()->json([
                 'success' => false,
-                'message' => 'Invalid verification link'
+                'message' => 'Invalid verification link',
             ], 400);
         }
 
         if ($user->hasVerifiedEmail()) {
             return response()->json([
                 'success' => true,
-                'message' => 'Email already verified'
+                'message' => 'Email already verified',
             ]);
         }
 
@@ -404,7 +405,7 @@ class CustomerAuthController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Email verified successfully. You can now login.'
+            'message' => 'Email verified successfully. You can now login.',
         ]);
     }
 
@@ -424,7 +425,7 @@ class CustomerAuthController extends Controller
             'data' => [
                 'exists' => $exists,
                 'message' => $exists ? 'Email is already registered' : 'Email is available',
-            ]
+            ],
         ]);
     }
 
@@ -435,14 +436,14 @@ class CustomerAuthController extends Controller
     {
         $providers = ['google', 'facebook', 'apple'];
 
-        if (!in_array($provider, $providers)) {
+        if (! in_array($provider, $providers)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Invalid provider'
+                'message' => 'Invalid provider',
             ], 400);
         }
 
-        $redirectUrl = \Laravel\Socialite\Facades\Socialite::driver($provider)
+        $redirectUrl = Socialite::driver($provider)
             ->stateless()
             ->redirect()
             ->getTargetUrl();
@@ -452,7 +453,8 @@ class CustomerAuthController extends Controller
             'data' => [
                 'redirect_url' => $redirectUrl,
                 'provider' => $provider,
-            ]
+            ],
         ]);
     }
 }
+

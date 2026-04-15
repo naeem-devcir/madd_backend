@@ -8,8 +8,8 @@ use App\Jobs\Payment\ProcessStripeRefund;
 use App\Models\Payment\StripeWebhookLog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
-use Stripe\Webhook;
 use Stripe\Exception\SignatureVerificationException;
+use Stripe\Webhook;
 
 class StripeWebhookController extends Controller
 {
@@ -26,6 +26,7 @@ class StripeWebhookController extends Controller
             $event = Webhook::constructEvent($payload, $sigHeader, $endpointSecret);
         } catch (SignatureVerificationException $e) {
             Log::error('Invalid Stripe webhook signature', ['error' => $e->getMessage()]);
+
             return response()->json(['error' => 'Invalid signature'], 401);
         }
 
@@ -122,3 +123,4 @@ class StripeWebhookController extends Controller
         }
     }
 }
+

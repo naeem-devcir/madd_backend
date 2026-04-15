@@ -3,18 +3,25 @@
 namespace App\Http\Controllers\Api\Payment;
 
 use App\Http\Controllers\Controller;
-use App\Models\Order\Order;
+use App\Jobs\Notification\SendVendorPaymentFailedNotification;
+use App\Jobs\Notification\SendVendorPaymentOverdueNotification;
 use App\Models\Financial\PaymentTransaction;
+use App\Models\Financial\PlatformFee;
 use App\Models\Financial\Refund;
-use App\Services\Payment\StripeService;
+use App\Models\Order\Order;
+use App\Models\Vendor\Vendor;
 use App\Services\Payment\PayPalService;
+use App\Services\Payment\StripeService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Stripe\Exception\SignatureVerificationException;
+use Stripe\Webhook;
 
 class WebhookController extends Controller
 {
     protected $stripeService;
+
     protected $payPalService;
 
     public function __construct(StripeService $stripeService, PayPalService $payPalService)
@@ -33,12 +40,14 @@ class WebhookController extends Controller
         $endpointSecret = config('services.stripe.webhook_secret');
 
         try {
-            $event = \Stripe\Webhook::constructEvent($payload, $sigHeader, $endpointSecret);
+            $event = Webhook::constructEvent($payload, $sigHeader, $endpointSecret);
         } catch (\UnexpectedValueException $e) {
             Log::error('Invalid Stripe webhook payload', ['error' => $e->getMessage()]);
+
             return response()->json(['error' => 'Invalid payload'], 400);
-        } catch (\Stripe\Exception\SignatureVerificationException $e) {
+        } catch (SignatureVerificationException $e) {
             Log::error('Invalid Stripe webhook signature', ['error' => $e->getMessage()]);
+
             return response()->json(['error' => 'Invalid signature'], 401);
         }
 
@@ -147,9 +156,10 @@ class WebhookController extends Controller
     private function handlePaymentIntentSucceeded($paymentIntent)
     {
         $orderId = $paymentIntent->metadata->order_id ?? null;
-        
-        if (!$orderId) {
+
+        if (! $orderId) {
             Log::warning('No order_id in payment intent metadata', ['payment_intent_id' => $paymentIntent->id]);
+
             return;
         }
 
@@ -157,15 +167,16 @@ class WebhookController extends Controller
 
         try {
             $order = Order::find($orderId);
-            
-            if (!$order) {
+
+            if (! $order) {
                 Log::error('Order not found for payment intent', ['order_id' => $orderId]);
+
                 return;
             }
 
             // Create payment transaction record
             $transaction = PaymentTransaction::create([
-                'order_id' => $order->uuid,
+                'order_id' => $order->id,
                 'gateway' => 'stripe',
                 'gateway_transaction_id' => $paymentIntent->id,
                 'transaction_type' => 'capture',
@@ -199,7 +210,7 @@ class WebhookController extends Controller
     {
         $orderId = $paymentIntent->metadata->order_id ?? null;
 
-        if (!$orderId) {
+        if (! $orderId) {
             return;
         }
 
@@ -211,7 +222,7 @@ class WebhookController extends Controller
             if ($order) {
                 // Create failed transaction record
                 PaymentTransaction::create([
-                    'order_id' => $order->uuid,
+                    'order_id' => $order->id,
                     'gateway' => 'stripe',
                     'gateway_transaction_id' => $paymentIntent->id,
                     'transaction_type' => 'sale',
@@ -245,15 +256,16 @@ class WebhookController extends Controller
         try {
             $paymentTransaction = PaymentTransaction::where('gateway_transaction_id', $paymentIntentId)->first();
 
-            if (!$paymentTransaction) {
+            if (! $paymentTransaction) {
                 Log::warning('Payment transaction not found for refund', ['payment_intent_id' => $paymentIntentId]);
+
                 return;
             }
 
             // Create refund record
             $refund = Refund::create([
                 'order_id' => $paymentTransaction->order_id,
-                'payment_transaction_id' => $paymentTransaction->uuid,
+                'payment_transaction_id' => $paymentTransaction->id,
                 'refund_amount' => $charge->amount_refunded / 100,
                 'reason' => $charge->refund_reason ?? 'Customer request',
                 'status' => 'processed',
@@ -268,7 +280,7 @@ class WebhookController extends Controller
 
             // Update order payment status
             $order = $paymentTransaction->order;
-            
+
             if ($charge->amount_refunded >= $charge->amount) {
                 $order->updatePaymentStatus('refunded', 'Full refund processed');
                 $order->updateStatus('refunded', 'Order fully refunded');
@@ -320,7 +332,7 @@ class WebhookController extends Controller
         if ($paymentTransaction) {
             $metadata = $paymentTransaction->metadata ?? [];
             $metadata['dispute_status'] = $dispute->status;
-            
+
             $paymentTransaction->update(['metadata' => $metadata]);
 
             if ($dispute->status === 'won') {
@@ -339,13 +351,13 @@ class WebhookController extends Controller
         $vendorId = $subscription->metadata->vendor_id ?? null;
 
         if ($vendorId) {
-            $vendor = \App\Models\Vendor\Vendor::find($vendorId);
-            
+            $vendor = Vendor::find($vendorId);
+
             if ($vendor && $subscription->status === 'active') {
                 $vendor->activate();
             } elseif ($vendor && $subscription->status === 'past_due') {
                 // Send notification about past due payment
-                \App\Jobs\Notification\SendVendorPaymentOverdueNotification::dispatch($vendor);
+                SendVendorPaymentOverdueNotification::dispatch($vendor);
             }
         }
     }
@@ -358,8 +370,8 @@ class WebhookController extends Controller
         $vendorId = $subscription->metadata->vendor_id ?? null;
 
         if ($vendorId) {
-            $vendor = \App\Models\Vendor\Vendor::find($vendorId);
-            
+            $vendor = Vendor::find($vendorId);
+
             if ($vendor) {
                 $vendor->suspend('Subscription cancelled');
             }
@@ -375,14 +387,14 @@ class WebhookController extends Controller
 
         if ($vendorId) {
             // Record platform fee payment
-            \App\Models\Financial\PlatformFee::create([
+            PlatformFee::create([
                 'vendor_id' => $vendorId,
                 'fee_type' => 'subscription',
                 'amount' => $invoice->amount_paid / 100,
                 'currency' => strtoupper($invoice->currency),
                 'status' => 'paid',
                 'paid_at' => now(),
-                'description' => 'Subscription payment - ' . $invoice->billing_reason,
+                'description' => 'Subscription payment - '.$invoice->billing_reason,
             ]);
         }
     }
@@ -396,19 +408,19 @@ class WebhookController extends Controller
 
         if ($vendorId) {
             // Record failed payment
-            \App\Models\Financial\PlatformFee::create([
+            PlatformFee::create([
                 'vendor_id' => $vendorId,
                 'fee_type' => 'subscription',
                 'amount' => $invoice->amount_due / 100,
                 'currency' => strtoupper($invoice->currency),
                 'status' => 'pending',
-                'description' => 'Failed subscription payment - ' . $invoice->billing_reason,
+                'description' => 'Failed subscription payment - '.$invoice->billing_reason,
             ]);
 
             // Send notification
-            $vendor = \App\Models\Vendor\Vendor::find($vendorId);
+            $vendor = Vendor::find($vendorId);
             if ($vendor) {
-                \App\Jobs\Notification\SendVendorPaymentFailedNotification::dispatch($vendor);
+                SendVendorPaymentFailedNotification::dispatch($vendor);
             }
         }
     }
@@ -420,8 +432,9 @@ class WebhookController extends Controller
     {
         $orderId = $resource['custom_id'] ?? null;
 
-        if (!$orderId) {
+        if (! $orderId) {
             Log::warning('No custom_id in PayPal payment', ['payment_id' => $resource['id']]);
+
             return;
         }
 
@@ -433,7 +446,7 @@ class WebhookController extends Controller
             if ($order) {
                 // Create payment transaction
                 PaymentTransaction::create([
-                    'order_id' => $order->uuid,
+                    'order_id' => $order->id,
                     'gateway' => 'paypal',
                     'gateway_transaction_id' => $resource['id'],
                     'transaction_type' => 'capture',
@@ -484,7 +497,7 @@ class WebhookController extends Controller
         if ($paymentTransaction) {
             Refund::create([
                 'order_id' => $paymentTransaction->order_id,
-                'payment_transaction_id' => $paymentTransaction->uuid,
+                'payment_transaction_id' => $paymentTransaction->id,
                 'refund_amount' => $resource['amount']['value'],
                 'status' => 'processed',
                 'gateway_refund_id' => $resource['id'],
@@ -518,7 +531,7 @@ class WebhookController extends Controller
         $vendorId = $resource['custom_id'] ?? null;
 
         if ($vendorId) {
-            $vendor = \App\Models\Vendor\Vendor::find($vendorId);
+            $vendor = Vendor::find($vendorId);
             if ($vendor) {
                 $vendor->activate();
             }
@@ -533,7 +546,7 @@ class WebhookController extends Controller
         $vendorId = $resource['custom_id'] ?? null;
 
         if ($vendorId) {
-            $vendor = \App\Models\Vendor\Vendor::find($vendorId);
+            $vendor = Vendor::find($vendorId);
             if ($vendor) {
                 $vendor->suspend('PayPal subscription cancelled');
             }
@@ -572,3 +585,4 @@ class WebhookController extends Controller
         return true;
     }
 }
+

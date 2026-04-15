@@ -11,13 +11,13 @@ return new class extends Migration
         Schema::create('transactions', function (Blueprint $table) {
             $table->id();
             $table->uuid('uuid')->unique();
-            
+
             // foreignUuid: FK references uuid
-            $table->foreignUuid('settlement_id')->nullable()->references('uuid')->on('settlements')->nullOnDelete();
-            $table->foreignUuid('order_id')->nullable()->references('uuid')->on('orders')->nullOnDelete();
-            $table->foreignUuid('vendor_id')->nullable()->references('uuid')->on('vendors')->nullOnDelete();
-            $table->foreignUuid('initiated_by')->nullable()->references('uuid')->on('users')->nullOnDelete();
-            
+            $table->foreignId('settlement_id')->nullable()->constrained('settlements')->nullOnDelete();
+            $table->foreignId('order_id')->nullable()->constrained('orders')->nullOnDelete();
+            $table->foreignId('vendor_id')->nullable()->constrained('vendors')->nullOnDelete();
+            $table->foreignId('initiated_by')->nullable()->constrained('users')->nullOnDelete();
+
             $table->string('payable_type')->index();
             $table->unsignedBigInteger('payable_id')->index();
             $table->enum('type', ['sale', 'refund', 'commission', 'adjustment', 'payout']);
@@ -35,7 +35,7 @@ return new class extends Migration
             $table->timestamp('created_at')->useCurrent();
             $table->timestamp('processed_at')->nullable();
             $table->softDeletes();
-            
+
             // Indexes
             $table->index(['payable_type', 'payable_id']);
             $table->index(['type', 'status']);

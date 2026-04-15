@@ -27,3 +27,4 @@ class TwoFactorController extends PlaceholderApiController
         return $this->notImplemented('Two-factor recovery codes');
     }
 }
+

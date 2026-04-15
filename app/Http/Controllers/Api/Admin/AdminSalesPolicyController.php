@@ -32,3 +32,4 @@ class AdminSalesPolicyController extends PlaceholderApiController
         return $this->notImplemented('Admin sales policy deletion', ['id' => $id]);
     }
 }
+

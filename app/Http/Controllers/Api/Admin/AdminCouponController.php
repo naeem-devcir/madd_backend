@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Config\Coupon;
-use App\Models\Vendor\Vendor;
 use App\Services\Promotion\CouponService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -44,9 +43,9 @@ class AdminCouponController extends Controller
         }
 
         if ($request->has('search')) {
-            $query->where(function($q) use ($request) {
-                $q->where('code', 'like', '%' . $request->search . '%')
-                  ->orWhere('description', 'like', '%' . $request->search . '%');
+            $query->where(function ($q) use ($request) {
+                $q->where('code', 'like', '%'.$request->search.'%')
+                    ->orWhere('description', 'like', '%'.$request->search.'%');
             });
         }
 
@@ -64,7 +63,7 @@ class AdminCouponController extends Controller
                 'current_page' => $coupons->currentPage(),
                 'last_page' => $coupons->lastPage(),
                 'total' => $coupons->total(),
-            ]
+            ],
         ]);
     }
 
@@ -112,7 +111,7 @@ class AdminCouponController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Coupon created successfully',
-                'data' => $coupon->load('vendor')
+                'data' => $coupon->load('vendor'),
             ], 201);
 
         } catch (\Exception $e) {
@@ -121,7 +120,7 @@ class AdminCouponController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create coupon',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -148,7 +147,7 @@ class AdminCouponController extends Controller
                 'coupon' => $coupon,
                 'usage_statistics' => $usageStats,
                 'recent_orders' => $coupon->orders()->latest()->limit(10)->get(),
-            ]
+            ],
         ]);
     }
 
@@ -160,7 +159,7 @@ class AdminCouponController extends Controller
         $coupon = Coupon::findOrFail($id);
 
         $validated = $request->validate([
-            'code' => 'sometimes|string|max:50|unique:coupons,code,' . $coupon->id,
+            'code' => 'sometimes|string|max:50|unique:coupons,code,'.$coupon->id,
             'description' => 'nullable|string',
             'discount_type' => ['sometimes', Rule::in(['percentage', 'fixed_amount', 'free_shipping', 'buy_x_get_y'])],
             'discount_value' => 'required_if:discount_type,percentage,fixed_amount|numeric|min:0',
@@ -195,7 +194,7 @@ class AdminCouponController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Coupon updated successfully',
-                'data' => $coupon->fresh()
+                'data' => $coupon->fresh(),
             ]);
 
         } catch (\Exception $e) {
@@ -204,7 +203,7 @@ class AdminCouponController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update coupon',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -220,7 +219,7 @@ class AdminCouponController extends Controller
         if ($coupon->used_count > 0) {
             return response()->json([
                 'success' => false,
-                'message' => 'Cannot delete coupon that has been used. Consider deactivating it instead.'
+                'message' => 'Cannot delete coupon that has been used. Consider deactivating it instead.',
             ], 422);
         }
 
@@ -238,7 +237,7 @@ class AdminCouponController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Coupon deleted successfully'
+                'message' => 'Coupon deleted successfully',
             ]);
 
         } catch (\Exception $e) {
@@ -247,7 +246,7 @@ class AdminCouponController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete coupon',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -258,8 +257,8 @@ class AdminCouponController extends Controller
     public function toggleStatus($id)
     {
         $coupon = Coupon::findOrFail($id);
-        
-        $coupon->is_active = !$coupon->is_active;
+
+        $coupon->is_active = ! $coupon->is_active;
         $coupon->save();
 
         // Sync status to Magento
@@ -272,7 +271,7 @@ class AdminCouponController extends Controller
             'message' => $coupon->is_active ? 'Coupon activated' : 'Coupon deactivated',
             'data' => [
                 'is_active' => $coupon->is_active,
-            ]
+            ],
         ]);
     }
 
@@ -284,7 +283,7 @@ class AdminCouponController extends Controller
         $originalCoupon = Coupon::findOrFail($id);
 
         $newCoupon = $originalCoupon->replicate();
-        $newCoupon->code = $originalCoupon->code . '_copy_' . time();
+        $newCoupon->code = $originalCoupon->code.'_copy_'.time();
         $newCoupon->used_count = 0;
         $newCoupon->spent_amount = 0;
         $newCoupon->magento_rule_id = null;
@@ -296,7 +295,7 @@ class AdminCouponController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Coupon duplicated successfully',
-            'data' => $newCoupon
+            'data' => $newCoupon,
         ], 201);
     }
 
@@ -327,7 +326,7 @@ class AdminCouponController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $stats
+            'data' => $stats,
         ]);
     }
 
@@ -344,14 +343,14 @@ class AdminCouponController extends Controller
 
         $coupons = $query->get();
 
-        $filename = 'coupons_export_' . date('Y-m-d_His') . '.csv';
+        $filename = 'coupons_export_'.date('Y-m-d_His').'.csv';
         $handle = fopen('php://temp', 'w');
 
         // Headers
         fputcsv($handle, [
-            'ID', 'Code', 'Type', 'Discount Type', 'Discount Value', 
-            'Min Order', 'Max Uses', 'Used Count', 'Total Discount', 
-            'Valid From', 'Valid To', 'Status', 'Vendor', 'Created At'
+            'ID', 'Code', 'Type', 'Discount Type', 'Discount Value',
+            'Min Order', 'Max Uses', 'Used Count', 'Total Discount',
+            'Valid From', 'Valid To', 'Status', 'Vendor', 'Created At',
         ]);
 
         // Data
@@ -384,7 +383,7 @@ class AdminCouponController extends Controller
                 'filename' => $filename,
                 'content' => base64_encode($csvContent),
                 'mime_type' => 'text/csv',
-            ]
+            ],
         ]);
     }
 
@@ -400,3 +399,4 @@ class AdminCouponController extends Controller
         ], 501);
     }
 }
+

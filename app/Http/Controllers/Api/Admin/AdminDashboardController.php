@@ -3,11 +3,10 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\Financial\Settlement;
 use App\Models\Order\Order;
 use App\Models\User;
 use App\Models\Vendor\Vendor;
-use App\Models\Financial\Settlement;
-use App\Models\Financial\Transaction;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -67,7 +66,7 @@ class AdminDashboardController extends Controller
                 'statistics' => $stats,
                 'recent_orders' => $recentOrders,
                 'recent_vendors' => $recentVendors,
-            ]
+            ],
         ]);
     }
 
@@ -77,8 +76,8 @@ class AdminDashboardController extends Controller
     public function statistics(Request $request)
     {
         $period = $request->get('period', '30_days');
-        
-        $days = match($period) {
+
+        $days = match ($period) {
             '7_days' => 7,
             '30_days' => 30,
             '90_days' => 90,
@@ -146,7 +145,8 @@ class AdminDashboardController extends Controller
                 'new_vendors' => $newVendors,
                 'top_products' => $topProducts,
                 'top_vendors' => $topVendors,
-            ]
+            ],
         ]);
     }
 }
+

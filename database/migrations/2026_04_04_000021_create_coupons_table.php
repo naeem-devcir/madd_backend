@@ -14,10 +14,10 @@ return new class extends Migration
             $table->string('code', 50)->unique();
             $table->string('description')->nullable();
             $table->enum('type', ['platform', 'vendor']);
-            
+
             // foreignUuid: FK references uuid
-            $table->foreignUuid('vendor_id')->nullable()->references('uuid')->on('vendors')->nullOnDelete();
-            
+            $table->foreignId('vendor_id')->nullable()->constrained('vendors')->nullOnDelete();
+
             $table->enum('discount_type', ['percentage', 'fixed_amount', 'free_shipping', 'buy_x_get_y']);
             $table->decimal('discount_value', 12, 4);
             $table->decimal('min_order_amount', 12, 4)->default(0);
@@ -41,7 +41,7 @@ return new class extends Migration
             $table->boolean('is_active')->default(true);
             $table->timestamps();
             $table->softDeletes();
-            
+
             // Indexes
             $table->index('code');
             $table->index('is_active');

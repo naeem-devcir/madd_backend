@@ -4,8 +4,8 @@ namespace App\Http\Controllers\Api\Customer;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\UserResource;
-use App\Models\User;
 use App\Models\Address;
+use App\Models\User;
 use App\Services\Customer\CustomerService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -27,13 +27,13 @@ class CustomerProfileController extends Controller
      */
     public function show(Request $request)
     {
-        $user = $request->user()->load(['addresses', 'orders' => function($query) {
+        $user = $request->user()->load(['addresses', 'orders' => function ($query) {
             $query->latest()->limit(5);
         }]);
 
         return response()->json([
             'success' => true,
-            'data' => new UserResource($user)
+            'data' => new UserResource($user),
         ]);
     }
 
@@ -83,7 +83,7 @@ class CustomerProfileController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Profile updated successfully',
-                'data' => new UserResource($user->fresh())
+                'data' => new UserResource($user->fresh()),
             ]);
 
         } catch (\Exception $e) {
@@ -92,7 +92,7 @@ class CustomerProfileController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update profile',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -109,7 +109,7 @@ class CustomerProfileController extends Controller
 
         $user = $request->user();
 
-        if (!Hash::check($request->current_password, $user->password)) {
+        if (! Hash::check($request->current_password, $user->password)) {
             throw ValidationException::withMessages([
                 'current_password' => ['The current password is incorrect.'],
             ]);
@@ -123,7 +123,7 @@ class CustomerProfileController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Password changed successfully. You have been logged out from other devices.'
+            'message' => 'Password changed successfully. You have been logged out from other devices.',
         ]);
     }
 
@@ -140,7 +140,7 @@ class CustomerProfileController extends Controller
 
         $user = $request->user();
 
-        if (!Hash::check($request->password, $user->password)) {
+        if (! Hash::check($request->password, $user->password)) {
             throw ValidationException::withMessages([
                 'password' => ['The password is incorrect.'],
             ]);
@@ -160,7 +160,7 @@ class CustomerProfileController extends Controller
 
             // Anonymize user data for GDPR compliance
             $user->update([
-                'email' => 'deleted_' . $user->id . '_' . time() . '@deleted.com',
+                'email' => 'deleted_'.$user->id.'_'.time().'@deleted.com',
                 'phone' => null,
                 'first_name' => 'Deleted',
                 'last_name' => 'User',
@@ -200,7 +200,7 @@ class CustomerProfileController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Your account has been permanently deleted. We\'re sorry to see you go.'
+                'message' => 'Your account has been permanently deleted. We\'re sorry to see you go.',
             ]);
 
         } catch (\Exception $e) {
@@ -209,7 +209,7 @@ class CustomerProfileController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete account',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -224,7 +224,7 @@ class CustomerProfileController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $addresses
+            'data' => $addresses,
         ]);
     }
 
@@ -263,7 +263,7 @@ class CustomerProfileController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Address added successfully',
-                'data' => $address
+                'data' => $address,
             ], 201);
 
         } catch (\Exception $e) {
@@ -272,7 +272,7 @@ class CustomerProfileController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to add address',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -312,7 +312,7 @@ class CustomerProfileController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Address updated successfully',
-                'data' => $address
+                'data' => $address,
             ]);
 
         } catch (\Exception $e) {
@@ -321,7 +321,7 @@ class CustomerProfileController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update address',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -338,7 +338,7 @@ class CustomerProfileController extends Controller
         if ($user->addresses()->count() === 1) {
             return response()->json([
                 'success' => false,
-                'message' => 'You cannot delete your only address. Please add another address first.'
+                'message' => 'You cannot delete your only address. Please add another address first.',
             ], 422);
         }
 
@@ -355,7 +355,7 @@ class CustomerProfileController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Address deleted successfully'
+            'message' => 'Address deleted successfully',
         ]);
     }
 
@@ -379,7 +379,7 @@ class CustomerProfileController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Default address updated successfully',
-                'data' => $address
+                'data' => $address,
             ]);
 
         } catch (\Exception $e) {
@@ -388,7 +388,7 @@ class CustomerProfileController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to set default address',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -414,7 +414,7 @@ class CustomerProfileController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $preferences
+            'data' => $preferences,
         ]);
     }
 
@@ -435,7 +435,7 @@ class CustomerProfileController extends Controller
         ]);
 
         $preferences = $user->preferences ?? [];
-        
+
         // Merge new preferences
         foreach ($validated as $key => $value) {
             if (is_array($value)) {
@@ -457,7 +457,7 @@ class CustomerProfileController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Preferences updated successfully',
-            'data' => $preferences
+            'data' => $preferences,
         ]);
     }
 
@@ -481,7 +481,7 @@ class CustomerProfileController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $statistics
+            'data' => $statistics,
         ]);
     }
 
@@ -491,12 +491,12 @@ class CustomerProfileController extends Controller
     protected function uploadAvatar($file, User $user): string
     {
         $path = $file->store("avatars/{$user->id}", 'public');
-        
+
         // Delete old avatar if exists
-        if ($user->avatar_url && !str_contains($user->avatar_url, 'ui-avatars.com')) {
+        if ($user->avatar_url && ! str_contains($user->avatar_url, 'ui-avatars.com')) {
             \Storage::disk('public')->delete($user->avatar_url);
         }
-        
+
         return $path;
     }
 
@@ -512,7 +512,7 @@ class CustomerProfileController extends Controller
         $preferences['newsletter_updated_at'] = now()->toIso8601String();
         $user->preferences = $preferences;
         $user->save();
-        
+
         // Example: Mailchimp integration
         // if ($subscribe) {
         //     Newsletter::subscribe($user->email, [
@@ -524,3 +524,4 @@ class CustomerProfileController extends Controller
         // }
     }
 }
+

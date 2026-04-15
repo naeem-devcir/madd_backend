@@ -31,7 +31,7 @@ class SocialLoginRequest extends FormRequest
             'country_code' => 'sometimes|string|size:2',
             'locale' => 'sometimes|string|size:2',
             'device_name' => 'nullable|string|max:255',
-            
+
             // Vendor specific fields
             'company_name' => 'required_if:user_type,vendor|string|max:255',
             'vat_number' => 'nullable|string|max:50',

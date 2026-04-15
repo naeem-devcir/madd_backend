@@ -23,7 +23,7 @@ class TokenService
 
         // Store session
         UserSession::create([
-            'user_id' => $user->uuid,
+            'user_id' => $user->id,
             'token_jti' => $accessToken->accessToken->id,
             'refresh_token' => $refreshToken['hash'],
             'refresh_token_jti' => $refreshToken['jti'],
@@ -134,7 +134,7 @@ class TokenService
     private function getDeviceType(string $deviceName): string
     {
         $deviceName = strtolower($deviceName);
-        
+
         if (str_contains($deviceName, 'ios')) {
             return 'ios';
         }
@@ -144,7 +144,7 @@ class TokenService
         if (str_contains($deviceName, 'mobile')) {
             return 'mobile';
         }
-        
+
         return 'web';
     }
 
@@ -154,11 +154,11 @@ class TokenService
     public function validateToken(string $token): ?User
     {
         $accessToken = PersonalAccessToken::findToken($token);
-        
+
         if (!$accessToken || $accessToken->expires_at && $accessToken->expires_at->isPast()) {
             return null;
         }
-        
+
         return $accessToken->tokenable;
     }
 
@@ -168,6 +168,6 @@ class TokenService
     public function revokeAllTokens(User $user): void
     {
         $user->tokens()->delete();
-        UserSession::where('user_id', $user->uuid)->delete();
+        UserSession::where('user_id', $user->id)->delete();
     }
 }

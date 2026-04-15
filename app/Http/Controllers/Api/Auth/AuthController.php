@@ -54,15 +54,14 @@ class AuthController extends Controller
             $role = $validated['user_type'] ?? 'customer';
 
             $user->assignRole($role);
-           
 
             // If vendor registration, create vendor record
             if ($role === 'vendor') {
                 $defaultPlan = VendorPlan::where('is_default', true)->first();
 
                 Vendor::create([
-                    'user_id' => $user->uuid,
-                    'company_name' => $validated['company_name'] ?? $validated['first_name'] . ' ' . $validated['last_name'],
+                    'user_id' => $user->id,
+                    'company_name' => $validated['company_name'] ?? $validated['first_name'].' '.$validated['last_name'],
                     'company_slug' => $this->generateCompanySlug($validated['company_name'] ?? $user->full_name),
                     'country_code' => $validated['country_code'],
                     'address_line1' => $validated['address_line1'] ?? '',
@@ -81,7 +80,7 @@ class AuthController extends Controller
 
             // Generate tokens
             $tokens = $this->tokenService->generateTokens($user);
-
+            
             return response()->json([
                 'success' => true,
                 'message' => 'Registration successful. Please verify your email.',
@@ -91,15 +90,16 @@ class AuthController extends Controller
                     'refresh_token' => $tokens['refresh_token'],
                     'token_type' => 'Bearer',
                     'expires_in' => $tokens['expires_in'],
-                ]
+                ],
             ], 201);
 
         } catch (\Exception $e) {
             DB::rollBack();
+
             return response()->json([
                 'success' => false,
                 'message' => 'Registration failed',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -114,7 +114,7 @@ class AuthController extends Controller
         // Find user
         $user = User::where('email', $validated['email'])->first();
 
-        if (!$user || !Hash::check($validated['password'], $user->password)) {
+        if (! $user || ! Hash::check($validated['password'], $user->password)) {
             throw ValidationException::withMessages([
                 'email' => ['The provided credentials are incorrect.'],
             ]);
@@ -129,7 +129,7 @@ class AuthController extends Controller
 
         // Check if email is verified
         // if (!$user->is_email_verified && !$validated['bypass_verification'] ?? false) {
-        if (!$user->is_email_verified && !($request->input('bypass_verification', false))) {
+        if (! $user->is_email_verified && ! ($request->input('bypass_verification', false))) {
             return response()->json([
                 'success' => false,
                 'message' => 'Please verify your email address first.',
@@ -141,7 +141,7 @@ class AuthController extends Controller
         if ($user->status !== 'active') {
             return response()->json([
                 'success' => false,
-                'message' => 'Your account is ' . $user->status . '. Please contact support.',
+                'message' => 'Your account is '.$user->status.'. Please contact support.',
             ], 403);
         }
 
@@ -173,7 +173,7 @@ class AuthController extends Controller
                 'token_type' => 'Bearer',
                 'expires_in' => $tokens['expires_in'],
                 'permissions' => $user->getPermissionArray(),
-            ]
+            ],
         ]);
     }
 
@@ -192,7 +192,7 @@ class AuthController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Logged out successfully'
+            'message' => 'Logged out successfully',
         ]);
     }
 
@@ -207,7 +207,7 @@ class AuthController extends Controller
 
         $tokens = $this->tokenService->refreshTokens($request->refresh_token);
 
-        if (!$tokens) {
+        if (! $tokens) {
             return response()->json([
                 'success' => false,
                 'message' => 'Invalid or expired refresh token',
@@ -221,7 +221,7 @@ class AuthController extends Controller
                 'refresh_token' => $tokens['refresh_token'],
                 'token_type' => 'Bearer',
                 'expires_in' => $tokens['expires_in'],
-            ]
+            ],
         ]);
     }
 
@@ -234,7 +234,7 @@ class AuthController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => new UserResource($user)
+            'data' => new UserResource($user),
         ]);
     }
 
@@ -248,7 +248,7 @@ class AuthController extends Controller
         $validated = $request->validate([
             'first_name' => 'sometimes|string|max:100',
             'last_name' => 'sometimes|string|max:100',
-            'phone' => 'sometimes|string|max:20|unique:users,phone,' . $user->uuid,
+            'phone' => 'sometimes|string|max:20|unique:users,phone,'.$user->id,
             'avatar_url' => 'nullable|url|max:500',
             'locale' => 'sometimes|string|size:2',
             'timezone' => 'sometimes|string|max:50',
@@ -260,7 +260,7 @@ class AuthController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Profile updated successfully',
-            'data' => new UserResource($user->fresh())
+            'data' => new UserResource($user->fresh()),
         ]);
     }
 
@@ -276,7 +276,7 @@ class AuthController extends Controller
 
         $user = $request->user();
 
-        if (!Hash::check($request->current_password, $user->password)) {
+        if (! Hash::check($request->current_password, $user->password)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Current password is incorrect',
@@ -291,7 +291,7 @@ class AuthController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Password changed successfully'
+            'message' => 'Password changed successfully',
         ]);
     }
 
@@ -307,7 +307,7 @@ class AuthController extends Controller
 
         $user = $request->user();
 
-        if (!Hash::check($request->password, $user->password)) {
+        if (! Hash::check($request->password, $user->password)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Password is incorrect',
@@ -316,7 +316,7 @@ class AuthController extends Controller
 
         // Anonymize user data instead of hard delete for GDPR compliance
         $user->update([
-            'email' => 'deleted_' . $user->uuid . '@example.com',
+            'email' => 'deleted_'.$user->uuid.'@example.com',
             'phone' => null,
             'first_name' => 'Deleted',
             'last_name' => 'User',
@@ -336,7 +336,7 @@ class AuthController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Account deleted successfully'
+            'message' => 'Account deleted successfully',
         ]);
     }
 
@@ -350,7 +350,7 @@ class AuthController extends Controller
         $counter = 1;
 
         while (Vendor::where('company_slug', $slug)->exists()) {
-            $slug = $originalSlug . '-' . $counter;
+            $slug = $originalSlug.'-'.$counter;
             $counter++;
         }
 

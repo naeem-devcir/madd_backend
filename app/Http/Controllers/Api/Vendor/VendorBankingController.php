@@ -24,7 +24,7 @@ class VendorBankingController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $bankAccounts->map(function($account) {
+            'data' => $bankAccounts->map(function ($account) {
                 return [
                     'id' => $account->id,
                     'account_type' => $account->account_type,
@@ -97,7 +97,7 @@ class VendorBankingController extends Controller
                     'account_type' => $bankAccount->account_type,
                     'is_verified' => $bankAccount->is_verified,
                     'verification_status' => 'pending',
-                ]
+                ],
             ], 201);
 
         } catch (\Exception $e) {
@@ -106,7 +106,7 @@ class VendorBankingController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to add bank account',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -148,7 +148,7 @@ class VendorBankingController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Bank account updated successfully',
-                'data' => $bankAccount
+                'data' => $bankAccount,
             ]);
 
         } catch (\Exception $e) {
@@ -157,7 +157,7 @@ class VendorBankingController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update bank account',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -183,7 +183,7 @@ class VendorBankingController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Bank account deleted successfully'
+            'message' => 'Bank account deleted successfully',
         ]);
     }
 
@@ -210,7 +210,7 @@ class VendorBankingController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Primary bank account updated successfully'
+                'message' => 'Primary bank account updated successfully',
             ]);
 
         } catch (\Exception $e) {
@@ -219,7 +219,7 @@ class VendorBankingController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update primary bank account',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -243,7 +243,7 @@ class VendorBankingController extends Controller
             'data' => [
                 'verification_status' => 'pending',
                 'estimated_days' => 2,
-            ]
+            ],
         ]);
     }
 
@@ -265,9 +265,9 @@ class VendorBankingController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => [
-                    'url' => 'https://connect.stripe.com/express/' . $stripeAccount->stripe_account_id,
+                    'url' => 'https://connect.stripe.com/express/'.$stripeAccount->stripe_account_id,
                     'account_id' => $stripeAccount->stripe_account_id,
-                ]
+                ],
             ]);
         }
 
@@ -278,8 +278,8 @@ class VendorBankingController extends Controller
             'success' => true,
             'data' => [
                 'url' => 'https://connect.stripe.com/express/onboarding',
-                'account_id' => 'acct_mock_' . $vendor->getKey(),
-            ]
+                'account_id' => 'acct_mock_'.$vendor->getKey(),
+            ],
         ]);
     }
 
@@ -288,10 +288,15 @@ class VendorBankingController extends Controller
      */
     private function maskAccountNumber($accountNumber)
     {
-        if (!$accountNumber) return null;
+        if (! $accountNumber) {
+            return null;
+        }
         $length = strlen($accountNumber);
-        if ($length <= 4) return $accountNumber;
-        return str_repeat('*', $length - 4) . substr($accountNumber, -4);
+        if ($length <= 4) {
+            return $accountNumber;
+        }
+
+        return str_repeat('*', $length - 4).substr($accountNumber, -4);
     }
 
     /**
@@ -299,9 +304,15 @@ class VendorBankingController extends Controller
      */
     private function maskIban($iban)
     {
-        if (!$iban) return null;
+        if (! $iban) {
+            return null;
+        }
         $length = strlen($iban);
-        if ($length <= 8) return $iban;
-        return substr($iban, 0, 4) . str_repeat('*', $length - 8) . substr($iban, -4);
+        if ($length <= 8) {
+            return $iban;
+        }
+
+        return substr($iban, 0, 4).str_repeat('*', $length - 8).substr($iban, -4);
     }
 }
+

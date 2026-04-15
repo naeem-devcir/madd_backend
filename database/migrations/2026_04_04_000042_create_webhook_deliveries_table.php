@@ -11,7 +11,7 @@ return new class extends Migration
         Schema::create('webhook_deliveries', function (Blueprint $table) {
             $table->id();
             $table->uuid('uuid')->unique();
-            $table->foreignUuid('endpoint_id')->references('uuid')->on('webhook_endpoints')->cascadeOnDelete();
+            $table->foreignId('endpoint_id')->constrained('webhook_endpoints')->cascadeOnDelete();
             $table->string('event_type');
             $table->json('payload')->nullable();
             $table->integer('response_status')->nullable();
@@ -21,7 +21,6 @@ return new class extends Migration
             $table->enum('status', ['pending', 'success', 'failed', 'retry'])->default('pending');
             $table->text('error_message')->nullable();
             $table->timestamps();
-            
             $table->index('endpoint_id');
             $table->index('event_type');
             $table->index('status');

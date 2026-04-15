@@ -27,12 +27,12 @@ class UserResource extends JsonResource
             'timezone' => $this->timezone,
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
-            
+
             // Relationships
-            'vendor' => $this->whenLoaded('vendor', function() {
+            'vendor' => $this->whenLoaded('vendor', function () {
                 return new VendorResource($this->vendor);
             }),
-            'mlm_agent' => $this->whenLoaded('mlmAgent', function() {
+            'mlm_agent' => $this->whenLoaded('mlmAgent', function () {
                 return [
                     'id' => $this->mlmAgent->id,
                     'level' => $this->mlmAgent->level,
@@ -40,10 +40,10 @@ class UserResource extends JsonResource
                     'total_commissions' => $this->mlmAgent->total_commissions_earned,
                 ];
             }),
-            'roles' => $this->whenLoaded('roles', function() {
+            'roles' => $this->whenLoaded('roles', function () {
                 return $this->roles->pluck('name');
             }),
-            'permissions' => $this->whenLoaded('permissions', function() {
+            'permissions' => $this->whenLoaded('permissions', function () {
                 return $this->getPermissionArray();
             }),
         ];

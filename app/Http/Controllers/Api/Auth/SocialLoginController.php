@@ -5,17 +5,16 @@ namespace App\Http\Controllers\Api\Auth;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\Auth\SocialLoginRequest;
 use App\Http\Resources\UserResource;
-use App\Models\SocialAccount;
 use App\Models\User;
 use App\Services\Auth\SocialAuthService;
 use App\Services\Auth\TokenService;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Laravel\Socialite\Facades\Socialite;
 
 class SocialLoginController extends Controller
 {
     protected $socialAuthService;
+
     protected $tokenService;
 
     public function __construct(SocialAuthService $socialAuthService, TokenService $tokenService)
@@ -55,7 +54,7 @@ class SocialLoginController extends Controller
                     'token_type' => 'Bearer',
                     'expires_in' => $tokens['expires_in'],
                     'is_new_user' => $user->wasRecentlyCreated,
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
@@ -64,7 +63,7 @@ class SocialLoginController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Social login failed',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -80,7 +79,8 @@ class SocialLoginController extends Controller
             'success' => true,
             'data' => [
                 'redirect_url' => $redirectUrl,
-            ]
+            ],
         ]);
     }
 }
+

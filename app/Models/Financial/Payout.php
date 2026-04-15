@@ -39,93 +39,93 @@ class Payout extends Model
     ];
 
     // ========== Relationships ==========
-    
+
     public function vendor()
     {
-        return $this->belongsTo(Vendor::class, 'vendor_id', 'uuid');
+        return $this->belongsTo(Vendor::class, 'vendor_id', 'id');
     }
-    
+
     public function settlement()
     {
-        return $this->belongsTo(Settlement::class, 'settlement_id', 'uuid');
+        return $this->belongsTo(Settlement::class, 'settlement_id', 'id');
     }
-    
+
     public function processedBy()
     {
-        return $this->belongsTo(User::class, 'processed_by', 'uuid');
+        return $this->belongsTo(User::class, 'processed_by', 'id');
     }
-    
+
     // ========== Scopes ==========
-    
+
     public function scopePending($query)
     {
         return $query->where('status', 'pending');
     }
-    
+
     public function scopeProcessing($query)
     {
         return $query->where('status', 'processing');
     }
-    
+
     public function scopeCompleted($query)
     {
         return $query->where('status', 'completed');
     }
-    
+
     public function scopeFailed($query)
     {
         return $query->where('status', 'failed');
     }
-    
+
     // ========== Accessors ==========
-    
+
     public function getFormattedAmountAttribute(): string
     {
-        return $this->currency . ' ' . number_format($this->amount, 2);
+        return $this->currency.' '.number_format($this->amount, 2);
     }
-    
+
     public function getIsPendingAttribute(): bool
     {
         return $this->status === 'pending';
     }
-    
+
     public function getIsProcessingAttribute(): bool
     {
         return $this->status === 'processing';
     }
-    
+
     public function getIsCompletedAttribute(): bool
     {
         return $this->status === 'completed';
     }
-    
+
     public function getIsFailedAttribute(): bool
     {
         return $this->status === 'failed';
     }
-    
+
     // ========== Methods ==========
-    
+
     public function markAsProcessing(): void
     {
         $this->status = 'processing';
         $this->processed_at = now();
         $this->save();
     }
-    
+
     public function markAsCompleted(string $gatewayPayoutId): void
     {
         $this->status = 'completed';
         $this->gateway_payout_id = $gatewayPayoutId;
         $this->completed_at = now();
         $this->save();
-        
+
         // Update settlement if linked
         if ($this->settlement_id) {
             $this->settlement->markAsPaid($gatewayPayoutId, $this->payout_method);
         }
     }
-    
+
     public function markAsFailed(string $reason): void
     {
         $this->status = 'failed';

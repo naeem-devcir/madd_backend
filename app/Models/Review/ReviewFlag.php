@@ -26,31 +26,31 @@ class ReviewFlag extends Model
     ];
 
     // ========== Relationships ==========
-    
+
     public function review()
     {
         return $this->belongsTo(Review::class, 'review_id', 'id');
     }
-    
+
     public function user()
     {
         return $this->belongsTo(User::class, 'user_id', 'id');
     }
-    
+
     public function reviewedBy()
     {
         return $this->belongsTo(User::class, 'reviewed_by', 'id');
     }
-    
+
     // ========== Scopes ==========
-    
+
     public function scopePending($query)
     {
         return $query->where('status', 'pending');
     }
-    
+
     // ========== Methods ==========
-    
+
     public function dismiss(User $reviewer): void
     {
         $this->status = 'dismissed';
@@ -58,14 +58,14 @@ class ReviewFlag extends Model
         $this->reviewed_at = now();
         $this->save();
     }
-    
+
     public function uphold(User $reviewer): void
     {
         $this->status = 'reviewed';
         $this->reviewed_by = $reviewer->id;
         $this->reviewed_at = now();
         $this->save();
-        
+
         $this->review->status = 'rejected';
         $this->review->save();
     }

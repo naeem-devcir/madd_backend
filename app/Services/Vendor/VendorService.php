@@ -61,7 +61,7 @@ class VendorService
     public function createDefaultStore(Vendor $vendor): VendorStore
     {
         $store = VendorStore::create([
-            'vendor_id' => $vendor->uuid,
+            'vendor_id' => $vendor->id,  // ✅ FIXED - Integer ID
             'store_name' => $vendor->company_name,
             'store_slug' => $vendor->company_slug,
             'country_code' => $vendor->country_code,
@@ -99,14 +99,15 @@ class VendorService
         $originalSlug = $slug;
         $counter = 1;
 
-        while (VendorStore::where('vendor_id', $vendor->uuid)->where('store_slug', $slug)->exists()) {
+        // ✅ FIXED - Integer ID use karo
+        while (VendorStore::where('vendor_id', $vendor->id)->where('store_slug', $slug)->exists()) {
             $slug = $originalSlug . '-' . $counter;
             $counter++;
         }
 
         // Create store
         $store = VendorStore::create([
-            'vendor_id' => $vendor->uuid,
+            'vendor_id' => $vendor->id,  // ✅ FIXED - Integer ID
             'store_name' => $data['store_name'],
             'store_slug' => $slug,
             'country_code' => $data['country_code'],
@@ -139,7 +140,7 @@ class VendorService
         $fullDomain = $subdomain . '.' . config('app.main_domain', 'madd.eu');
 
         $domain = Domain::create([
-            'vendor_store_id' => $store->uuid,
+            'vendor_store_id' => $store->id,  // ✅ FIXED - Integer ID (store ki id)
             'domain' => $fullDomain,
             'type' => 'madd_subdomain',
             'subdomain' => $subdomain,
@@ -201,7 +202,7 @@ class VendorService
         return DB::table('order_items')
             ->join('orders', 'order_items.order_id', '=', 'orders.id')
             ->join('vendor_products', 'order_items.vendor_product_id', '=', 'vendor_products.id')
-            ->where('orders.vendor_id', $vendor->uuid)
+            ->where('orders.vendor_id', $vendor->id)  // ✅ FIXED - Integer ID
             ->where('orders.created_at', '>=', $startDate)
             ->where('orders.status', '!=', 'cancelled')
             ->select('vendor_products.name', DB::raw('SUM(order_items.qty_ordered) as quantity'), DB::raw('SUM(order_items.row_total) as revenue'))
@@ -216,7 +217,7 @@ class VendorService
      */
     private function getDailySales(Vendor $vendor, $startDate)
     {
-        return Order::where('vendor_id', $vendor->uuid)
+        return Order::where('vendor_id', $vendor->id)  // ✅ FIXED - Integer ID
             ->where('created_at', '>=', $startDate)
             ->where('status', '!=', 'cancelled')
             ->select(DB::raw('DATE(created_at) as date'), DB::raw('SUM(grand_total) as total'))

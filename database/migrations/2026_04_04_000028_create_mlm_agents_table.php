@@ -11,11 +11,11 @@ return new class extends Migration
         Schema::create('mlm_agents', function (Blueprint $table) {
             $table->id();
             $table->uuid('uuid')->unique();
-            
+
             // foreignUuid: FK references uuid
-            $table->foreignUuid('user_id')->unique()->references('uuid')->on('users')->cascadeOnDelete();
+            $table->foreignId('user_id')->unique()->constrained('users')->cascadeOnDelete();
             $table->unsignedBigInteger('parent_id')->nullable();
-            
+
             $table->tinyInteger('level')->default(1);
             $table->enum('territory_type', ['country', 'region', 'city']);
             $table->string('territory_code', 50);
@@ -28,7 +28,7 @@ return new class extends Migration
             $table->enum('status', ['active', 'inactive', 'suspended']);
             $table->timestamps();
             $table->softDeletes();
-            
+
             $table->index('parent_id');
             $table->index('level');
         });

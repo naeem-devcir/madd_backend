@@ -43,7 +43,7 @@ class VendorShippingController extends Controller
                 'methods' => $methods,
                 'available_carriers' => $availableCarriers,
                 'store_country' => $store->country_code,
-            ]
+            ],
         ]);
     }
 
@@ -76,7 +76,7 @@ class VendorShippingController extends Controller
         try {
             // Delete existing methods not in the new list
             $existingMethodIds = collect($request->methods)
-                ->filter(function($method) {
+                ->filter(function ($method) {
                     return isset($method['id']);
                 })
                 ->pluck('id')
@@ -95,7 +95,7 @@ class VendorShippingController extends Controller
                     $method = ShippingMethod::where('id', $methodData['id'])
                         ->where('vendor_store_id', $store->id)
                         ->first();
-                    
+
                     if ($method) {
                         $method->update($methodData);
                     }
@@ -109,7 +109,7 @@ class VendorShippingController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Shipping methods updated successfully',
-                'data' => ShippingMethod::where('vendor_store_id', $store->id)->get()
+                'data' => ShippingMethod::where('vendor_store_id', $store->id)->get(),
             ]);
 
         } catch (\Exception $e) {
@@ -118,7 +118,7 @@ class VendorShippingController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update shipping methods',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -144,7 +144,7 @@ class VendorShippingController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $zones
+            'data' => $zones,
         ]);
     }
 
@@ -187,7 +187,7 @@ class VendorShippingController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Shipping zone created successfully',
-                'data' => $zone->load('methods')
+                'data' => $zone->load('methods'),
             ], 201);
 
         } catch (\Exception $e) {
@@ -196,7 +196,7 @@ class VendorShippingController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create shipping zone',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -208,9 +208,9 @@ class VendorShippingController extends Controller
     {
         $vendor = $request->user()->vendor;
 
-        $zone = ShippingZone::whereHas('store', function($q) use ($vendor) {
-                $q->where('vendor_id', $vendor->getKey());
-            })
+        $zone = ShippingZone::whereHas('store', function ($q) use ($vendor) {
+            $q->where('vendor_id', $vendor->getKey());
+        })
             ->findOrFail($id);
 
         $request->validate([
@@ -236,7 +236,7 @@ class VendorShippingController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Shipping zone updated successfully',
-                'data' => $zone->load('methods')
+                'data' => $zone->load('methods'),
             ]);
 
         } catch (\Exception $e) {
@@ -245,7 +245,7 @@ class VendorShippingController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update shipping zone',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -257,16 +257,16 @@ class VendorShippingController extends Controller
     {
         $vendor = $request->user()->vendor;
 
-        $zone = ShippingZone::whereHas('store', function($q) use ($vendor) {
-                $q->where('vendor_id', $vendor->getKey());
-            })
+        $zone = ShippingZone::whereHas('store', function ($q) use ($vendor) {
+            $q->where('vendor_id', $vendor->getKey());
+        })
             ->findOrFail($id);
 
         $zone->delete();
 
         return response()->json([
             'success' => true,
-            'message' => 'Shipping zone deleted successfully'
+            'message' => 'Shipping zone deleted successfully',
         ]);
     }
 
@@ -282,7 +282,7 @@ class VendorShippingController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $carriers
+            'data' => $carriers,
         ]);
     }
 
@@ -324,7 +324,7 @@ class VendorShippingController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $rates
+            'data' => $rates,
         ]);
     }
 
@@ -365,7 +365,8 @@ class VendorShippingController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $tracking
+            'data' => $tracking,
         ]);
     }
 }
+

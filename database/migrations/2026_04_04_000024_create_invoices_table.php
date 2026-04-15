@@ -15,14 +15,14 @@ return new class extends Migration
             $table->enum('type', ['vendor_invoice', 'credit_note', 'platform_invoice']);
             $table->string('payable_type')->index();
             $table->unsignedBigInteger('payable_id')->index();
-            
+
             // foreignUuid: FK references uuid
-            $table->foreignUuid('vendor_id')->nullable()->references('uuid')->on('vendors')->nullOnDelete();
-            $table->foreignUuid('settlement_id')->nullable()->references('uuid')->on('settlements')->nullOnDelete();
-            $table->foreignUuid('order_id')->nullable()->references('uuid')->on('orders')->nullOnDelete();
+            $table->foreignId('vendor_id')->nullable()->constrained('vendors')->nullOnDelete();
+            $table->foreignId('settlement_id')->nullable()->constrained('settlements')->nullOnDelete();
+            $table->foreignId('order_id')->nullable()->constrained('orders')->nullOnDelete();
             $table->unsignedBigInteger('credit_note_id')->nullable();
             $table->foreignId('madd_company_id')->nullable()->constrained('madd_companies')->nullOnDelete();
-            
+
             $table->json('billing_address');
             $table->string('vat_number', 50)->nullable();
             $table->boolean('reverse_charge')->default(false);
@@ -40,7 +40,7 @@ return new class extends Migration
             $table->timestamp('paid_at')->nullable();
             $table->timestamps();
             $table->softDeletes();
-            
+
             // Indexes
             $table->index('invoice_number');
             $table->index('status');

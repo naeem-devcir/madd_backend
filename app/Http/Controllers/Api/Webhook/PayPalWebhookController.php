@@ -20,8 +20,9 @@ class PayPalWebhookController extends Controller
         $headers = $request->headers->all();
 
         // Verify webhook signature
-        if (!$this->verifySignature($request)) {
+        if (! $this->verifySignature($request)) {
             Log::warning('Invalid PayPal webhook signature');
+
             return response()->json(['error' => 'Invalid signature'], 401);
         }
 
@@ -149,3 +150,4 @@ class PayPalWebhookController extends Controller
         }
     }
 }
+

@@ -34,7 +34,7 @@ class AdminProductController extends Controller
             'data' => $pendingProducts,
             'meta' => [
                 'total_pending' => ProductDraft::where('status', 'pending')->count(),
-            ]
+            ],
         ]);
     }
 
@@ -52,7 +52,7 @@ class AdminProductController extends Controller
         if ($draft->status !== 'pending') {
             return response()->json([
                 'success' => false,
-                'message' => 'Product is not pending approval'
+                'message' => 'Product is not pending approval',
             ], 422);
         }
 
@@ -69,7 +69,7 @@ class AdminProductController extends Controller
                 'data' => [
                     'product_id' => $draft->vendor_product_id,
                     'status' => 'approved',
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
@@ -78,7 +78,7 @@ class AdminProductController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to approve product',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -97,7 +97,7 @@ class AdminProductController extends Controller
         if ($draft->status !== 'pending') {
             return response()->json([
                 'success' => false,
-                'message' => 'Product is not pending approval'
+                'message' => 'Product is not pending approval',
             ], 422);
         }
 
@@ -114,7 +114,7 @@ class AdminProductController extends Controller
                 'data' => [
                     'draft_id' => $draft->id,
                     'status' => 'rejected',
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
@@ -123,7 +123,7 @@ class AdminProductController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to reject product',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -144,9 +144,9 @@ class AdminProductController extends Controller
         }
 
         if ($request->has('search')) {
-            $query->where(function($q) use ($request) {
-                $q->where('name', 'like', '%' . $request->search . '%')
-                  ->orWhere('sku', 'like', '%' . $request->search . '%');
+            $query->where(function ($q) use ($request) {
+                $q->where('name', 'like', '%'.$request->search.'%')
+                    ->orWhere('sku', 'like', '%'.$request->search.'%');
             });
         }
 
@@ -160,7 +160,7 @@ class AdminProductController extends Controller
                 'current_page' => $products->currentPage(),
                 'last_page' => $products->lastPage(),
                 'total' => $products->total(),
-            ]
+            ],
         ]);
     }
 
@@ -174,7 +174,7 @@ class AdminProductController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => new ProductResource($product)
+            'data' => new ProductResource($product),
         ]);
     }
 
@@ -194,7 +194,7 @@ class AdminProductController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Product deleted successfully'
+                'message' => 'Product deleted successfully',
             ]);
 
         } catch (\Exception $e) {
@@ -203,7 +203,7 @@ class AdminProductController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete product',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -237,7 +237,7 @@ class AdminProductController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $stats
+            'data' => $stats,
         ]);
     }
 
@@ -277,3 +277,4 @@ class AdminProductController extends Controller
         ], 501);
     }
 }
+

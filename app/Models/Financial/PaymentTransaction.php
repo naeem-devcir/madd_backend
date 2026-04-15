@@ -45,99 +45,99 @@ class PaymentTransaction extends Model
     ];
 
     // ========== Relationships ==========
-    
+
     public function order()
     {
-        return $this->belongsTo(Order::class, 'order_id', 'uuid');
+        return $this->belongsTo(Order::class, 'order_id', 'id');
     }
-    
+
     public function parentTransaction()
     {
         return $this->belongsTo(PaymentTransaction::class, 'parent_transaction_id', 'gateway_transaction_id');
     }
-    
+
     public function refunds()
     {
-        return $this->hasMany(Refund::class, 'payment_transaction_id', 'uuid');
+        return $this->hasMany(Refund::class, 'payment_transaction_id', 'id');
     }
-    
+
     // ========== Scopes ==========
-    
+
     public function scopeAuthorized($query)
     {
         return $query->where('status', 'authorized');
     }
-    
+
     public function scopeCaptured($query)
     {
         return $query->where('status', 'captured');
     }
-    
+
     public function scopeFailed($query)
     {
         return $query->where('status', 'failed');
     }
-    
+
     // ========== Accessors ==========
-    
+
     public function getIsAuthorizedAttribute(): bool
     {
         return $this->status === 'authorized';
     }
-    
+
     public function getIsCapturedAttribute(): bool
     {
         return $this->status === 'captured';
     }
-    
+
     public function getIsRefundedAttribute(): bool
     {
         return $this->status === 'refunded';
     }
-    
+
     public function getIsFailedAttribute(): bool
     {
         return $this->status === 'failed';
     }
-    
+
     public function getFormattedAmountAttribute(): string
     {
-        return $this->currency . ' ' . number_format($this->amount, 2);
+        return $this->currency.' '.number_format($this->amount, 2);
     }
-    
+
     // ========== Methods ==========
-    
+
     public function markAsCaptured(string $captureId): void
     {
         $this->status = 'captured';
         $this->gateway_transaction_id = $captureId;
         $this->captured_at = now();
         $this->save();
-        
+
         // Update order payment status
         $this->order->updatePaymentStatus('paid');
     }
-    
+
     public function markAsFailed(string $error): void
     {
         $this->status = 'failed';
         $this->error_message = $error;
         $this->save();
-        
+
         // Update order payment status
         $this->order->updatePaymentStatus('failed', $error);
     }
-    
+
     public function refund(float $amount, string $reason): Refund
     {
         $refund = Refund::create([
             'order_id' => $this->order_id,
-            'payment_transaction_id' => $this->uuid,
+            'payment_transaction_id' => $this->id,
             'refund_amount' => $amount,
             'reason' => $reason,
             'status' => 'pending',
         ]);
-        
+
         return $refund;
     }
 }

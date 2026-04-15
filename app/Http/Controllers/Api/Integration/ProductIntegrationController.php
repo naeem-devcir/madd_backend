@@ -27,3 +27,4 @@ class ProductIntegrationController extends PlaceholderApiController
         return $this->notImplemented('Product integration price update', ['sku' => $sku]);
     }
 }
+

@@ -26,7 +26,7 @@ class NotificationResource extends JsonResource
             'sent_at' => $this->sent_at?->toIso8601String(),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
-            
+
             // Formatted fields
             'time_ago' => $this->created_at?->diffForHumans(),
             'is_recent' => $this->created_at && $this->created_at->diffInDays(now()) <= 7,

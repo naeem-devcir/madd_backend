@@ -4,16 +4,17 @@ namespace App\Http\Controllers\Api\Product;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ReviewResource;
+use App\Jobs\Notification\SendFlaggedReviewNotification;
+use App\Jobs\Notification\SendNewReviewNotification;
+use App\Models\Order\Order;
+use App\Models\Order\OrderItem;
 use App\Models\Product\VendorProduct;
 use App\Models\Review\Review;
-use App\Models\Review\ReviewHelpfulVote;
 use App\Models\Review\ReviewFlag;
+use App\Models\Review\ReviewHelpfulVote;
 use App\Services\Review\ReviewService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\log;
-
-
 
 class ProductReviewController extends Controller
 {
@@ -36,14 +37,10 @@ class ProductReviewController extends Controller
             'with_images' => 'boolean',
         ]);
 
-
-        
-
-
         $product = VendorProduct::findOrFail($productId);
         $query = Review::where('vendor_product_id', $productId)
             ->where('status', 'approved');
-            // ->with(['customer', 'helpfulVotes']);
+        // ->with(['customer', 'helpfulVotes']);
 
         // Apply rating filter
         if ($request->has('rating')) {
@@ -94,8 +91,8 @@ class ProductReviewController extends Controller
                     'last_page' => $reviews->lastPage(),
                     'total' => $reviews->total(),
                     'per_page' => $reviews->perPage(),
-                ]
-            ]
+                ],
+            ],
         ]);
     }
 
@@ -114,7 +111,7 @@ class ProductReviewController extends Controller
                 'product_id' => $productId,
                 'product_name' => $product->name,
                 'statistics' => $stats,
-            ]
+            ],
         ]);
     }
 
@@ -139,7 +136,7 @@ class ProductReviewController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => new ReviewResource($review)
+            'data' => new ReviewResource($review),
         ]);
     }
 
@@ -150,7 +147,7 @@ class ProductReviewController extends Controller
     {
         $customer = auth()->user();
 
-        $reviews = Review::where('customer_id', $customer->uuid)
+        $reviews = Review::where('customer_id', $customer->id)
             ->with(['product', 'vendor', 'store'])
             ->orderBy('created_at', 'desc')
             ->paginate($request->get('per_page', 20));
@@ -159,10 +156,10 @@ class ProductReviewController extends Controller
             'success' => true,
             'data' => ReviewResource::collection($reviews),
             'meta' => [
-                'total' => Review::where('customer_id', $customer->uuid)->count(),
-                'approved' => Review::where('customer_id', $customer->uuid)->where('status', 'approved')->count(),
-                'pending' => Review::where('customer_id', $customer->uuid)->where('status', 'pending')->count(),
-            ]
+                'total' => Review::where('customer_id', $customer->id)->count(),
+                'approved' => Review::where('customer_id', $customer->id)->where('status', 'approved')->count(),
+                'pending' => Review::where('customer_id', $customer->id)->where('status', 'pending')->count(),
+            ],
         ]);
     }
 
@@ -184,17 +181,17 @@ class ProductReviewController extends Controller
         $product = VendorProduct::findOrFail($productId);
 
         // Verify customer purchased this product
-        $hasPurchased = $this->verifyPurchase($customer->uuid, $productId, $request->order_id);
+        $hasPurchased = $this->verifyPurchase($customer->id, $productId, $request->order_id);
 
-        if (!$hasPurchased) {
+        if (! $hasPurchased) {
             return response()->json([
                 'success' => false,
-                'message' => 'You can only review products you have purchased and received'
+                'message' => 'You can only review products you have purchased and received',
             ], 403);
         }
 
         // Check if already reviewed
-        $existingReview = Review::where('customer_id', $customer->uuid)
+        $existingReview = Review::where('customer_id', $customer->id)
             ->where('vendor_product_id', $productId)
             ->first();
 
@@ -205,7 +202,7 @@ class ProductReviewController extends Controller
                 'data' => [
                     'review_id' => $existingReview->id,
                     'status' => $existingReview->status,
-                ]
+                ],
             ], 422);
         }
 
@@ -213,7 +210,7 @@ class ProductReviewController extends Controller
 
         try {
             $review = Review::create([
-                'customer_id' => $customer->uuid,
+                'customer_id' => $customer->id,
                 'vendor_product_id' => $productId,
                 'vendor_id' => $product->vendor_id,
                 'vendor_store_id' => $product->vendor_store_id,
@@ -230,7 +227,7 @@ class ProductReviewController extends Controller
             DB::commit();
 
             // Notify admin about new review
-            \App\Jobs\Notification\SendNewReviewNotification::dispatch($review);
+            SendNewReviewNotification::dispatch($review);
 
             return response()->json([
                 'success' => true,
@@ -238,7 +235,7 @@ class ProductReviewController extends Controller
                 'data' => [
                     'review_id' => $review->id,
                     'status' => $review->status,
-                ]
+                ],
             ], 201);
 
         } catch (\Exception $e) {
@@ -247,7 +244,7 @@ class ProductReviewController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to submit review',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -267,7 +264,7 @@ class ProductReviewController extends Controller
         $customer = auth()->user();
 
         $review = Review::where('id', $reviewId)
-            ->where('customer_id', $customer->uuid)
+            ->where('customer_id', $customer->id)
             ->where('status', 'pending')
             ->firstOrFail();
 
@@ -281,7 +278,7 @@ class ProductReviewController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Review updated successfully',
-                'data' => new ReviewResource($review)
+                'data' => new ReviewResource($review),
             ]);
 
         } catch (\Exception $e) {
@@ -290,7 +287,7 @@ class ProductReviewController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update review',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -303,7 +300,7 @@ class ProductReviewController extends Controller
         $customer = auth()->user();
 
         $review = Review::where('id', $reviewId)
-            ->where('customer_id', $customer->uuid)
+            ->where('customer_id', $customer->id)
             ->whereIn('status', ['pending', 'rejected'])
             ->firstOrFail();
 
@@ -316,7 +313,7 @@ class ProductReviewController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Review deleted successfully'
+                'message' => 'Review deleted successfully',
             ]);
 
         } catch (\Exception $e) {
@@ -325,7 +322,7 @@ class ProductReviewController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete review',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -349,7 +346,7 @@ class ProductReviewController extends Controller
         if ($existingVote) {
             return response()->json([
                 'success' => false,
-                'message' => 'You have already voted on this review'
+                'message' => 'You have already voted on this review',
             ], 422);
         }
 
@@ -371,7 +368,7 @@ class ProductReviewController extends Controller
                 'message' => 'Review marked as helpful',
                 'data' => [
                     'helpful_count' => $review->helpful_count,
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
@@ -380,7 +377,7 @@ class ProductReviewController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to mark review',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -406,7 +403,7 @@ class ProductReviewController extends Controller
         if ($existingReport) {
             return response()->json([
                 'success' => false,
-                'message' => 'You have already reported this review'
+                'message' => 'You have already reported this review',
             ], 422);
         }
 
@@ -426,16 +423,16 @@ class ProductReviewController extends Controller
             if ($review->reported_count >= 3) {
                 $review->status = 'flagged';
                 $review->save();
-                
+
                 // Notify admin about flagged review
-                \App\Jobs\Notification\SendFlaggedReviewNotification::dispatch($review);
+                SendFlaggedReviewNotification::dispatch($review);
             }
 
             DB::commit();
 
             return response()->json([
                 'success' => true,
-                'message' => 'Review has been reported to moderators'
+                'message' => 'Review has been reported to moderators',
             ]);
 
         } catch (\Exception $e) {
@@ -444,7 +441,7 @@ class ProductReviewController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to report review',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -458,13 +455,13 @@ class ProductReviewController extends Controller
             ->where('status', 'approved');
 
         $total = $reviews->count();
-        
+
         if ($total === 0) {
             return [
                 'total' => 0,
                 'average_rating' => 0,
                 'rating_distribution' => [
-                    1 => 0, 2 => 0, 3 => 0, 4 => 0, 5 => 0
+                    1 => 0, 2 => 0, 3 => 0, 4 => 0, 5 => 0,
                 ],
                 'with_images' => 0,
                 'verified_purchases' => 0,
@@ -472,7 +469,7 @@ class ProductReviewController extends Controller
         }
 
         $average = $reviews->avg('rating');
-        
+
         $distribution = [];
         for ($i = 1; $i <= 5; $i++) {
             $distribution[$i] = $reviews->where('rating', $i)->count();
@@ -492,14 +489,14 @@ class ProductReviewController extends Controller
      */
     private function verifyPurchase($customerId, $productId, $orderId): bool
     {
-        $order = \App\Models\Order\Order::find($orderId);
+        $order = Order::find($orderId);
 
-        if (!$order) {
+        if (! $order) {
             return false;
         }
 
-        return \App\Models\Order\OrderItem::where('order_id', $order->uuid)
-            ->whereHas('order', function($query) use ($customerId) {
+        return OrderItem::where('order_id', $order->id)
+            ->whereHas('order', function ($query) use ($customerId) {
                 $query->where('customer_id', $customerId)
                     ->where('status', 'delivered');
             })
@@ -507,3 +504,4 @@ class ProductReviewController extends Controller
             ->exists();
     }
 }
+

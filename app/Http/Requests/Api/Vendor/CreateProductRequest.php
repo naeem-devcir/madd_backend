@@ -14,7 +14,7 @@ class CreateProductRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'vendor_store_id' => 'required|exists:vendor_stores,id',
+            'vendor_store_id' => 'required|exists:vendor_stores,uuid',
             'sku' => 'required|string|max:255|unique:vendor_products,sku',
             'name' => 'required|string|max:500',
             'description' => 'nullable|string',

@@ -2,20 +2,22 @@
 
 namespace App\Models\Return;
 
+use App\Models\Config\Courier;
+use App\Models\Order\Order;
+use App\Models\Traits\HasUuid;
 use App\Models\User;
 use App\Models\Vendor\Vendor;
-use App\Models\Order\Order;
-use App\Models\Config\Courier;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
-class Return extends Model
+class ReturnModel extends Model
 {
-    use HasFactory;
+    use HasFactory, HasUuid;
 
     protected $table = 'returns';
 
     protected $fillable = [
+        'uuid',
         'rma_number',
         'order_id',
         'customer_id',
@@ -37,144 +39,28 @@ class Return extends Model
         'refunded_at' => 'datetime',
     ];
 
-    // ========== Relationships ==========
-    
     public function order()
     {
-        return $this->belongsTo(Order::class, 'order_id', 'uuid');
+        return $this->belongsTo(Order::class, 'order_id');
     }
-    
+
     public function customer()
     {
-        return $this->belongsTo(User::class, 'customer_id', 'uuid');
+        return $this->belongsTo(User::class, 'customer_id');
     }
-    
+
     public function vendor()
     {
-        return $this->belongsTo(Vendor::class, 'vendor_id', 'uuid');
+        return $this->belongsTo(Vendor::class, 'vendor_id');
     }
-    
+
     public function courier()
     {
-        return $this->belongsTo(Courier::class, 'courier_id', 'uuid');
+        return $this->belongsTo(Courier::class, 'courier_id');
     }
-    
+
     public function items()
     {
-        return $this->hasMany(ReturnItem::class, 'return_id', 'uuid');
-    }
-    
-    // ========== Scopes ==========
-    
-    public function scopeRequested($query)
-    {
-        return $query->where('status', 'requested');
-    }
-    
-    public function scopeApproved($query)
-    {
-        return $query->where('status', 'approved');
-    }
-    
-    public function scopeShipped($query)
-    {
-        return $query->where('status', 'shipped');
-    }
-    
-    public function scopeReceived($query)
-    {
-        return $query->where('status', 'received');
-    }
-    
-    public function scopeRefunded($query)
-    {
-        return $query->where('status', 'refunded');
-    }
-    
-    // ========== Accessors ==========
-    
-    public function getRmaNumberAttribute($value): string
-    {
-        return $value ?? 'RMA-' . str_pad($this->id, 8, '0', STR_PAD_LEFT);
-    }
-    
-    public function getIsRequestedAttribute(): bool
-    {
-        return $this->status === 'requested';
-    }
-    
-    public function getIsApprovedAttribute(): bool
-    {
-        return $this->status === 'approved';
-    }
-    
-    public function getIsShippedAttribute(): bool
-    {
-        return $this->status === 'shipped';
-    }
-    
-    public function getIsReceivedAttribute(): bool
-    {
-        return $this->status === 'received';
-    }
-    
-    public function getIsRefundedAttribute(): bool
-    {
-        return $this->status === 'refunded';
-    }
-    
-    // ========== Methods ==========
-    
-    public function approve(): void
-    {
-        $this->status = 'approved';
-        $this->save();
-        
-        // Generate return label
-        if ($this->courier) {
-            \App\Jobs\Return\GenerateReturnLabel::dispatch($this);
-        }
-    }
-    
-    public function reject(string $reason): void
-    {
-        $this->status = 'rejected';
-        $this->notes = $reason;
-        $this->save();
-    }
-    
-    public function markAsShipped(string $trackingNumber): void
-    {
-        $this->status = 'shipped';
-        $this->tracking_number = $trackingNumber;
-        $this->save();
-    }
-    
-    public function markAsReceived(): void
-    {
-        $this->status = 'received';
-        $this->received_at = now();
-        $this->save();
-        
-        // Process refund
-        $this->processRefund();
-    }
-    
-    protected function processRefund(): void
-    {
-        if ($this->refund_amount && $this->status === 'received') {
-            // Process refund through payment gateway
-            \App\Jobs\Payment\ProcessRefund::dispatch($this);
-        }
-    }
-    
-    public function completeRefund(string $refundReference): void
-    {
-        $this->status = 'refunded';
-        $this->refunded_at = now();
-        $this->save();
-        
-        // Update order status
-        $this->order->updatePaymentStatus('refunded');
+        return $this->hasMany(ReturnItem::class, 'return_id');
     }
 }

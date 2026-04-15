@@ -34,14 +34,14 @@ class VendorAuthController extends Controller
 
         $user = User::where('email', $validated['email'])->first();
 
-        if (!$user || !Hash::check($validated['password'], $user->password)) {
+        if (! $user || ! Hash::check($validated['password'], $user->password)) {
             throw ValidationException::withMessages([
                 'email' => ['The provided credentials are incorrect.'],
             ]);
         }
 
         // Check if user is a vendor
-        if (!$user->hasRole('vendor') && $user->user_type !== 'vendor') {
+        if (! $user->hasRole('vendor') && $user->user_type !== 'vendor') {
             return response()->json([
                 'success' => false,
                 'message' => 'This account is not registered as a vendor.',
@@ -53,12 +53,12 @@ class VendorAuthController extends Controller
         if ($vendor->status !== 'active') {
             return response()->json([
                 'success' => false,
-                'message' => 'Your vendor account is ' . $vendor->status . '. Please contact support.',
+                'message' => 'Your vendor account is '.$vendor->status.'. Please contact support.',
             ], 403);
         }
 
         // Check if email is verified
-        if (!$user->is_email_verified) {
+        if (! $user->is_email_verified) {
             return response()->json([
                 'success' => false,
                 'message' => 'Please verify your email address first.',
@@ -88,7 +88,7 @@ class VendorAuthController extends Controller
                 'expires_in' => $tokens['expires_in'],
                 'vendor_status' => $vendor->status,
                 'onboarding_step' => $vendor->onboarding_step,
-            ]
+            ],
         ]);
     }
 
@@ -167,7 +167,7 @@ class VendorAuthController extends Controller
                     'refresh_token' => $tokens['refresh_token'],
                     'token_type' => 'Bearer',
                     'expires_in' => $tokens['expires_in'],
-                ]
+                ],
             ], 201);
 
         } catch (\Exception $e) {
@@ -176,7 +176,7 @@ class VendorAuthController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Registration failed',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -190,7 +190,7 @@ class VendorAuthController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Logged out successfully'
+            'message' => 'Logged out successfully',
         ]);
     }
 
@@ -205,7 +205,7 @@ class VendorAuthController extends Controller
 
         $tokens = $this->tokenService->refreshTokens($request->refresh_token);
 
-        if (!$tokens) {
+        if (! $tokens) {
             return response()->json([
                 'success' => false,
                 'message' => 'Invalid or expired refresh token',
@@ -219,7 +219,7 @@ class VendorAuthController extends Controller
                 'refresh_token' => $tokens['refresh_token'],
                 'token_type' => 'Bearer',
                 'expires_in' => $tokens['expires_in'],
-            ]
+            ],
         ]);
     }
 
@@ -233,10 +233,11 @@ class VendorAuthController extends Controller
         $counter = 1;
 
         while (Vendor::where('company_slug', $slug)->exists()) {
-            $slug = $originalSlug . '-' . $counter;
+            $slug = $originalSlug.'-'.$counter;
             $counter++;
         }
 
         return $slug;
     }
 }
+

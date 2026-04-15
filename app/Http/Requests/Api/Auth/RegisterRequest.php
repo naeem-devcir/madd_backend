@@ -24,7 +24,7 @@ class RegisterRequest extends FormRequest
             'country_code' => 'required|string|size:2',
             'locale' => 'nullable|string|size:2',
             'marketing_opt_in' => 'boolean',
-            
+
             // Vendor specific fields
             'company_name' => 'required_if:user_type,vendor|string|max:255',
             'vat_number' => 'nullable|string|max:50',

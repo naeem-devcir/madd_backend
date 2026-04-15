@@ -11,8 +11,8 @@ return new class extends Migration
         Schema::create('order_tracking', function (Blueprint $table) {
             $table->id();
             $table->uuid('uuid')->unique();
-            $table->foreignUuid('order_id')->references('uuid')->on('orders')->cascadeOnDelete();
-            $table->foreignUuid('carrier_id')->nullable()->references('uuid')->on('couriers')->nullOnDelete();
+            $table->foreignId('order_id')->constrained('orders')->cascadeOnDelete();
+            $table->foreignId('carrier_id')->nullable()->constrained('couriers')->nullOnDelete();
             $table->string('tracking_number');
             $table->string('tracking_url', 500)->nullable();
             $table->string('label_url', 500)->nullable();
@@ -22,7 +22,6 @@ return new class extends Migration
             $table->timestamp('last_update')->nullable();
             $table->json('tracking_events')->nullable();
             $table->timestamps();
-            
             $table->index('order_id');
             $table->index('tracking_number');
             $table->index('status');

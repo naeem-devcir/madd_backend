@@ -27,3 +27,4 @@ class VendorApiKeyController extends PlaceholderApiController
         return $this->notImplemented('Vendor API key regeneration', ['id' => $id]);
     }
 }
+

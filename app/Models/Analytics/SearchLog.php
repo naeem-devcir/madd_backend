@@ -2,16 +2,18 @@
 
 namespace App\Models\Analytics;
 
+use App\Models\Product\VendorProduct;
+use App\Models\Traits\HasUuid;
+use App\Models\User;
+use App\Models\Vendor\VendorStore;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Str;
 
 class SearchLog extends Model
 {
-    public $incrementing = false;
-    protected $keyType = 'string';
+    use HasUuid;
 
     protected $fillable = [
-        'id',
+        'uuid',
         'store_id',
         'user_id',
         'query',
@@ -32,20 +34,18 @@ class SearchLog extends Model
         'is_successful' => 'boolean',
     ];
 
-    protected static function boot()
+    public function store()
     {
-        parent::boot();
-
-        static::creating(function ($model) {
-            if (!$model->id) {
-                $model->id = (string) Str::uuid();
-            }
-        });
+        return $this->belongsTo(VendorStore::class, 'store_id');
     }
 
-    // 🔗 Relation (optional)
-    public function orderItem()
+    public function user()
     {
-        return $this->belongsTo(\App\Models\Order\OrderItem::class, 'clicked_product');
+        return $this->belongsTo(User::class, 'user_id');
+    }
+
+    public function clickedProduct()
+    {
+        return $this->belongsTo(VendorProduct::class, 'clicked_product');
     }
 }

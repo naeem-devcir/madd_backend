@@ -32,3 +32,4 @@ class VendorWebhookController extends PlaceholderApiController
         return $this->notImplemented('Vendor webhook test', ['id' => $id]);
     }
 }
+

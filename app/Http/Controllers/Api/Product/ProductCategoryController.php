@@ -31,8 +31,8 @@ class ProductCategoryController extends Controller
         $store = VendorStore::findOrFail($request->store_id);
 
         // Cache categories for better performance
-        $cacheKey = "store_categories_{$store->id}_" . ($request->parent_id ?? 'root');
-        
+        $cacheKey = "store_categories_{$store->id}_".($request->parent_id ?? 'root');
+
         $categories = Cache::remember($cacheKey, 3600, function () use ($store, $request) {
             return $this->categoryService->getCategories(
                 $store->magento_store_id,
@@ -51,7 +51,7 @@ class ProductCategoryController extends Controller
                 ],
                 'categories' => $categories,
                 'total' => count($categories),
-            ]
+            ],
         ]);
     }
 
@@ -71,7 +71,7 @@ class ProductCategoryController extends Controller
             ->firstOrFail();
 
         $cacheKey = "store_category_{$store->id}_{$slug}";
-        
+
         $category = Cache::remember($cacheKey, 3600, function () use ($store, $slug) {
             return $this->categoryService->getCategoryBySlug(
                 $store->magento_store_id,
@@ -79,10 +79,10 @@ class ProductCategoryController extends Controller
             );
         });
 
-        if (!$category) {
+        if (! $category) {
             return response()->json([
                 'success' => false,
-                'message' => 'Category not found'
+                'message' => 'Category not found',
             ], 404);
         }
 
@@ -119,7 +119,7 @@ class ProductCategoryController extends Controller
                 'subcategories' => $subcategories,
                 'products' => $products,
                 'filters' => $this->getAvailableFilters($store, $category['id']),
-            ]
+            ],
         ]);
     }
 
@@ -143,10 +143,10 @@ class ProductCategoryController extends Controller
             $slug
         );
 
-        if (!$category) {
+        if (! $category) {
             return response()->json([
                 'success' => false,
-                'message' => 'Category not found'
+                'message' => 'Category not found',
             ], 404);
         }
 
@@ -168,7 +168,7 @@ class ProductCategoryController extends Controller
                 'category' => $category,
                 'products' => $products['items'],
                 'total' => $products['total'],
-            ]
+            ],
         ]);
     }
 
@@ -186,7 +186,7 @@ class ProductCategoryController extends Controller
 
         $depth = $request->max_depth ?? 5;
         $cacheKey = "store_category_tree_{$store->id}_depth_{$depth}";
-        
+
         $tree = Cache::remember($cacheKey, 3600, function () use ($store, $request) {
             return $this->categoryService->getCategoryTree(
                 $store->magento_store_id,
@@ -202,7 +202,7 @@ class ProductCategoryController extends Controller
                     'name' => $store->store_name,
                 ],
                 'tree' => $tree,
-            ]
+            ],
         ]);
     }
 
@@ -219,7 +219,7 @@ class ProductCategoryController extends Controller
         $store = VendorStore::findOrFail($request->store_id);
 
         $cacheKey = "store_featured_categories_{$store->id}";
-        
+
         $featured = Cache::remember($cacheKey, 7200, function () use ($store, $request) {
             return $this->categoryService->getFeaturedCategories(
                 $store->magento_store_id,
@@ -229,7 +229,7 @@ class ProductCategoryController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $featured
+            'data' => $featured,
         ]);
     }
 
@@ -282,13 +282,14 @@ class ProductCategoryController extends Controller
         Cache::forget("store_categories_{$store->id}_root");
         Cache::forget("store_category_tree_{$store->id}_depth_5");
         Cache::forget("store_featured_categories_{$store->id}");
-        
+
         // Clear pattern-based cache
         Cache::tags(["store_{$store->id}_categories"])->flush();
 
         return response()->json([
             'success' => true,
-            'message' => 'Category cache cleared successfully'
+            'message' => 'Category cache cleared successfully',
         ]);
     }
 }
+

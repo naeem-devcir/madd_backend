@@ -32,3 +32,4 @@ class AdminLanguageController extends PlaceholderApiController
         return $this->notImplemented('Admin language deletion', ['id' => $id]);
     }
 }
+

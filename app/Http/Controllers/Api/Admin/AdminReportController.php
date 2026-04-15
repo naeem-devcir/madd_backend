@@ -3,11 +3,10 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\Financial\Settlement;
 use App\Models\Order\Order;
 use App\Models\User;
 use App\Models\Vendor\Vendor;
-use App\Models\Financial\Settlement;
-use App\Models\Financial\Transaction;
 use App\Services\Report\ReportService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -45,7 +44,7 @@ class AdminReportController extends Controller
                 'period' => $period,
                 'date_from' => $dateFrom,
                 'date_to' => $dateTo,
-            ]
+            ],
         ]);
     }
 
@@ -157,7 +156,7 @@ class AdminReportController extends Controller
                 'gateway_fees' => $gatewayFees,
                 'refunds' => $refunds,
                 'net_profit' => $netProfit,
-            ]
+            ],
         ]);
     }
 
@@ -219,7 +218,7 @@ class AdminReportController extends Controller
         }
 
         // Sort by revenue
-        usort($performance, function($a, $b) {
+        usort($performance, function ($a, $b) {
             return $b['revenue'] <=> $a['revenue'];
         });
 
@@ -232,7 +231,7 @@ class AdminReportController extends Controller
                 'total_commission' => array_sum(array_column($performance, 'commission')),
                 'date_from' => $dateFrom,
                 'date_to' => $dateTo,
-            ]
+            ],
         ]);
     }
 
@@ -264,16 +263,16 @@ class AdminReportController extends Controller
         }
 
         $products = $query->select(
-                'vendor_products.id',
-                'vendor_products.name',
-                'vendor_products.sku',
-                'orders.vendor_id',
-                DB::raw('SUM(order_items.qty_ordered) as quantity_sold'),
-                DB::raw('SUM(order_items.row_total) as revenue'),
-                DB::raw('AVG(order_items.price) as average_price'),
-                DB::raw('COUNT(DISTINCT orders.id) as order_count'),
-                DB::raw('SUM(order_items.tax_amount) as tax_collected')
-            )
+            'vendor_products.id',
+            'vendor_products.name',
+            'vendor_products.sku',
+            'orders.vendor_id',
+            DB::raw('SUM(order_items.qty_ordered) as quantity_sold'),
+            DB::raw('SUM(order_items.row_total) as revenue'),
+            DB::raw('AVG(order_items.price) as average_price'),
+            DB::raw('COUNT(DISTINCT orders.id) as order_count'),
+            DB::raw('SUM(order_items.tax_amount) as tax_collected')
+        )
             ->groupBy('vendor_products.id', 'vendor_products.name', 'vendor_products.sku', 'orders.vendor_id')
             ->orderBy('revenue', 'desc')
             ->limit($limit)
@@ -301,7 +300,7 @@ class AdminReportController extends Controller
                 'date_from' => $dateFrom,
                 'date_to' => $dateTo,
                 'limit' => $limit,
-            ]
+            ],
         ]);
     }
 
@@ -388,7 +387,7 @@ class AdminReportController extends Controller
                     'date_from' => $dateFrom,
                     'date_to' => $dateTo,
                 ],
-            ]
+            ],
         ]);
     }
 
@@ -408,7 +407,7 @@ class AdminReportController extends Controller
         $dateTo = $request->date_to;
         $reportType = $request->report_type;
 
-        $data = match($reportType) {
+        $data = match ($reportType) {
             'platform' => $this->reportService->getPlatformPerformance($dateFrom, $dateTo),
             'financial' => $this->getFinancialReportData($dateFrom, $dateTo),
             'vendor_performance' => $this->getVendorPerformanceData($dateFrom, $dateTo),
@@ -417,7 +416,7 @@ class AdminReportController extends Controller
             default => [],
         };
 
-        $filename = $reportType . '_report_' . date('Y-m-d_His') . '.csv';
+        $filename = $reportType.'_report_'.date('Y-m-d_His').'.csv';
         $csvContent = $this->arrayToCsv($data);
 
         return response()->json([
@@ -426,7 +425,7 @@ class AdminReportController extends Controller
                 'filename' => $filename,
                 'content' => base64_encode($csvContent),
                 'mime_type' => 'text/csv',
-            ]
+            ],
         ]);
     }
 
@@ -436,21 +435,21 @@ class AdminReportController extends Controller
     private function arrayToCsv(array $data): string
     {
         $handle = fopen('php://temp', 'w');
-        
-        if (!empty($data)) {
+
+        if (! empty($data)) {
             // Get headers from first item
             $headers = array_keys((array) $data[0]);
             fputcsv($handle, $headers);
-            
+
             foreach ($data as $row) {
                 fputcsv($handle, (array) $row);
             }
         }
-        
+
         rewind($handle);
         $csv = stream_get_contents($handle);
         fclose($handle);
-        
+
         return $csv;
     }
 
@@ -495,3 +494,4 @@ class AdminReportController extends Controller
         ], 501);
     }
 }
+

@@ -2,10 +2,10 @@
 
 namespace App\Models\Review;
 
+use App\Models\Product\VendorProduct;
 use App\Models\User;
 use App\Models\Vendor\Vendor;
 use App\Models\Vendor\VendorStore;
-use App\Models\Product\VendorProduct;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -74,20 +74,19 @@ class Review extends Model
     //     return $this->belongsTo(User::class, 'moderated_by', 'id');
     // }
 
-
     public function customer()
     {
-        return $this->belongsTo(User::class, 'customer_id', 'uuid');
+        return $this->belongsTo(User::class, 'customer_id', 'id');
     }
 
     public function vendor()
     {
-        return $this->belongsTo(Vendor::class, 'vendor_id', 'uuid');
+        return $this->belongsTo(Vendor::class, 'vendor_id', 'id');
     }
 
     public function store()
     {
-        return $this->belongsTo(VendorStore::class, 'vendor_store_id', 'uuid');
+        return $this->belongsTo(VendorStore::class, 'vendor_store_id', 'id');
     }
 
     public function product()
@@ -97,11 +96,8 @@ class Review extends Model
 
     public function moderatedBy()
     {
-        return $this->belongsTo(User::class, 'moderated_by', 'uuid');
+        return $this->belongsTo(User::class, 'moderated_by', 'id');
     }
-
-
-
 
     public function helpfulVotes()
     {
@@ -154,7 +150,7 @@ class Review extends Model
 
     public function getRatingStarsAttribute(): string
     {
-        return str_repeat('★', $this->rating) . str_repeat('☆', 5 - $this->rating);
+        return str_repeat('★', $this->rating).str_repeat('☆', 5 - $this->rating);
     }
 
     public function getIsApprovedAttribute(): bool
@@ -179,7 +175,7 @@ class Review extends Model
 
     public function getHasVendorResponseAttribute(): bool
     {
-        return !is_null($this->vendor_response);
+        return ! is_null($this->vendor_response);
     }
 
     // ========== Methods ==========
@@ -187,7 +183,7 @@ class Review extends Model
     public function approve(User $moderator): void
     {
         $this->status = 'approved';
-        $this->moderated_by = $moderator->uuid;
+        $this->moderated_by = $moderator->id;
         $this->moderated_at = now();
         $this->save();
 
@@ -199,7 +195,7 @@ class Review extends Model
     {
         $this->status = 'rejected';
         $this->rejected_reason = $reason;
-        $this->moderated_by = $moderator->uuid;
+        $this->moderated_by = $moderator->id;
         $this->moderated_at = now();
         $this->save();
     }

@@ -1,4 +1,5 @@
 <?php
+
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
@@ -18,7 +19,7 @@ return new class extends Migration
             // Codes
             $table->string('phone_code', 10)->nullable(); // +92
             $table->string('currency_code', 3)->nullable(); // PKR
-            
+
             // Region Info
             $table->string('region')->nullable(); // Asia
             $table->string('subregion')->nullable(); // Southern Asia

@@ -11,10 +11,10 @@ return new class extends Migration
         Schema::create('vendor_banking', function (Blueprint $table) {
             $table->id();
             $table->uuid('uuid')->unique();
-            
+
             // foreignUuid: FK references uuid
-            $table->foreignUuid('vendor_id')->references('uuid')->on('vendors')->cascadeOnDelete();
-            
+            $table->foreignId('vendor_id')->constrained('vendors')->cascadeOnDelete();
+
             $table->enum('account_type', ['bank', 'paypal', 'stripe']);
             $table->string('bank_name')->nullable();
             $table->string('iban', 34)->nullable();
@@ -29,7 +29,7 @@ return new class extends Migration
             $table->text('rejection_reason')->nullable();
             $table->timestamps();
             $table->softDeletes();
-            
+
             $table->index('is_primary');
         });
     }

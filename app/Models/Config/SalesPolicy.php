@@ -40,41 +40,41 @@ class SalesPolicy extends Model
     ];
 
     // ========== Relationships ==========
-    
+
     public function country()
     {
         return $this->belongsTo(CountryConfig::class, 'country_code', 'code');
     }
-    
+
     public function stores()
     {
         return $this->hasMany(VendorStore::class, 'sales_policy_id', 'id');
     }
-    
+
     // ========== Scopes ==========
-    
+
     public function scopeActive($query)
     {
         return $query->where('is_active', true);
     }
-    
+
     public function scopeByCountry($query, $countryCode)
     {
         return $query->where('country_code', $countryCode);
     }
-    
+
     // ========== Accessors ==========
-    
+
     public function getIsGuestCheckoutAllowedAttribute(): bool
     {
         return (bool) $this->guest_checkout_allowed;
     }
-    
+
     public function getPaymentMethodsListAttribute(): array
     {
         return $this->payment_methods ?? [];
     }
-    
+
     public function getShippingMethodsListAttribute(): array
     {
         return $this->shipping_methods ?? [];
