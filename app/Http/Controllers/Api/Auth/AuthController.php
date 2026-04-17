@@ -13,6 +13,7 @@ use App\Services\Auth\TokenService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Validation\ValidationException;
 
@@ -52,7 +53,7 @@ class AuthController extends Controller
 
             // Assign default role
             $role = $validated['user_type'] ?? 'customer';
-
+            
             $user->assignRole($role);
 
             // If vendor registration, create vendor record
@@ -108,11 +109,14 @@ class AuthController extends Controller
      */
     public function login(LoginRequest $request)
     {
+        
         $validated = $request->validated();
 
         // Find user
         $user = User::where('email', $validated['email'])->first();
 
+        log::info($validated['password']);
+        
         if (! $user || ! Hash::check($validated['password'], $user->password)) {
             throw ValidationException::withMessages([
                 'email' => ['The provided credentials are incorrect.'],
@@ -181,6 +185,7 @@ class AuthController extends Controller
      */
     public function logout(Request $request)
     {
+
         // Revoke current access token
         $request->user()->currentAccessToken()->delete();
 
