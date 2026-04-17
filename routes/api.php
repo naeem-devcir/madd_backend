@@ -33,6 +33,13 @@ Route::prefix('v1')->group(function () {
         ]);
     });
 
+
+// ADD THIS - Public countries endpoint for registration
+Route::get('countries', [Api\CountryController::class, 'index']);
+Route::get('countries/{code}', [Api\CountryController::class, 'show']);
+
+
+
     // ============================================
     // AUTHENTICATION ROUTES
     // ============================================
@@ -61,7 +68,7 @@ Route::prefix('v1')->group(function () {
         Route::post('login', [Api\Auth\AuthController::class, 'login']);
         Route::post('register', [Api\Auth\AuthController::class, 'register']);
         Route::post('refresh', [Api\Auth\AuthController::class, 'refresh']);
-
+        Route::get('me', [Api\Auth\AuthController::class, 'me']);
         // Password Reset - FIX: Add named routes
         Route::post('forgot-password', [Api\Auth\PasswordResetController::class, 'forgot'])
             ->name('password.email');
@@ -127,12 +134,12 @@ Route::prefix('v1')->group(function () {
 
         // User Profile
         Route::prefix('user')->group(function () {
+            Route::get('me', [Api\Auth\AuthController::class, 'me']);
             Route::get('profile', [Api\Auth\AuthController::class, 'profile']);
             Route::put('profile', [Api\Auth\AuthController::class, 'updateProfile']);
             Route::post('change-password', [Api\Auth\AuthController::class, 'changePassword']);
             Route::post('logout', [Api\Auth\AuthController::class, 'logout']);
             Route::delete('account', [Api\Auth\AuthController::class, 'deleteAccount']);
-
             // 2FA
             Route::prefix('2fa')->group(function () {
                 Route::post('enable', [Api\Auth\TwoFactorController::class, 'enable']);
@@ -208,7 +215,7 @@ Route::prefix('v1')->group(function () {
         Route::get('dashboard', [Api\Vendor\VendorDashboardController::class, 'index']);
         Route::get('statistics', [Api\Vendor\VendorDashboardController::class, 'statistics']);
 
-    // Profile Management
+        // Profile Management
         Route::prefix('profile')->group(function () {
             Route::get('/', [Api\Vendor\VendorProfileController::class, 'show']);
             Route::put('/', [Api\Vendor\VendorProfileController::class, 'update']);

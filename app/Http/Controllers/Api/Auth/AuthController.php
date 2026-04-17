@@ -61,7 +61,7 @@ class AuthController extends Controller
 
                 Vendor::create([
                     'user_id' => $user->id,
-                    'company_name' => $validated['company_name'] ?? $validated['first_name'].' '.$validated['last_name'],
+                    'company_name' => $validated['company_name'] ?? $validated['first_name'] . ' ' . $validated['last_name'],
                     'company_slug' => $this->generateCompanySlug($validated['company_name'] ?? $user->full_name),
                     'country_code' => $validated['country_code'],
                     'address_line1' => $validated['address_line1'] ?? '',
@@ -80,7 +80,7 @@ class AuthController extends Controller
 
             // Generate tokens
             $tokens = $this->tokenService->generateTokens($user);
-            
+
             return response()->json([
                 'success' => true,
                 'message' => 'Registration successful. Please verify your email.',
@@ -92,7 +92,6 @@ class AuthController extends Controller
                     'expires_in' => $tokens['expires_in'],
                 ],
             ], 201);
-
         } catch (\Exception $e) {
             DB::rollBack();
 
@@ -141,7 +140,7 @@ class AuthController extends Controller
         if ($user->status !== 'active') {
             return response()->json([
                 'success' => false,
-                'message' => 'Your account is '.$user->status.'. Please contact support.',
+                'message' => 'Your account is ' . $user->status . '. Please contact support.',
             ], 403);
         }
 
@@ -224,7 +223,15 @@ class AuthController extends Controller
             ],
         ]);
     }
+    public function me(Request $request)
+    {
+        $user = $request->user();
 
+        return response()->json([
+            'authenticated' => !is_null($user),
+            'user' => $user ? new UserResource($user) : null,
+        ]);
+    }
     /**
      * Get authenticated user profile
      */
@@ -248,7 +255,7 @@ class AuthController extends Controller
         $validated = $request->validate([
             'first_name' => 'sometimes|string|max:100',
             'last_name' => 'sometimes|string|max:100',
-            'phone' => 'sometimes|string|max:20|unique:users,phone,'.$user->id,
+            'phone' => 'sometimes|string|max:20|unique:users,phone,' . $user->id,
             'avatar_url' => 'nullable|url|max:500',
             'locale' => 'sometimes|string|size:2',
             'timezone' => 'sometimes|string|max:50',
@@ -316,7 +323,7 @@ class AuthController extends Controller
 
         // Anonymize user data instead of hard delete for GDPR compliance
         $user->update([
-            'email' => 'deleted_'.$user->uuid.'@example.com',
+            'email' => 'deleted_' . $user->uuid . '@example.com',
             'phone' => null,
             'first_name' => 'Deleted',
             'last_name' => 'User',
@@ -350,7 +357,7 @@ class AuthController extends Controller
         $counter = 1;
 
         while (Vendor::where('company_slug', $slug)->exists()) {
-            $slug = $originalSlug.'-'.$counter;
+            $slug = $originalSlug . '-' . $counter;
             $counter++;
         }
 

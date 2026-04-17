@@ -4,9 +4,12 @@ namespace App\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Traits\ForwardsCalls;
 
 class OrderResource extends JsonResource
 {
+    use ForwardsCalls;
+
     /**
      * Transform the order resource into an array.
      */
@@ -157,8 +160,10 @@ class OrderResource extends JsonResource
             'is_refunded' => $this->is_refunded,
             'is_shipped' => $this->is_shipped,
             'is_delivered' => $this->is_delivered,
-            'can_be_cancelled' => $this->canBeCancelled(),
-            'can_be_refunded' => $this->canBeRefunded(),
+            
+            // ✅ Fixed: Now calls methods on underlying model
+            'can_be_cancelled' => $this->forwardToModel('canBeCancelled'),
+            'can_be_refunded' => $this->forwardToModel('canBeRefunded'),
 
             // Source
             'source' => $this->source,
@@ -166,6 +171,50 @@ class OrderResource extends JsonResource
             // Metadata
             'metadata' => $this->metadata,
         ];
+    }
+
+    /**
+     * Forward method calls to the underlying model with error handling
+     * 
+     * @param string $method
+     * @param array $parameters
+     * @return mixed
+     */
+    public function __call($method, $parameters)
+    {
+        // Check if method exists on the underlying resource (Order model)
+        if (method_exists($this->resource, $method)) {
+            return $this->forwardCallTo($this->resource, $method, $parameters);
+        }
+        
+        // Fall back to parent implementation
+        return parent::__call($method, $parameters);
+    }
+
+    /**
+     * Safely forward a method call to the underlying model with null handling
+     * 
+     * @param string $method
+     * @param mixed $default
+     * @return mixed
+     */
+    protected function forwardToModel(string $method, $default = false)
+    {
+        try {
+            if ($this->resource && method_exists($this->resource, $method)) {
+                return $this->resource->$method();
+            }
+            
+            return $default;
+        } catch (\Exception $e) {
+            // Log error if needed, but don't break the response
+            logger()->warning("Failed to call {$method} on order model", [
+                'order_id' => $this->id ?? null,
+                'error' => $e->getMessage(),
+            ]);
+            
+            return $default;
+        }
     }
 
     /**
