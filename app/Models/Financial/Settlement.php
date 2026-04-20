@@ -10,6 +10,7 @@ use App\Models\Vendor\Vendor;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use App\Models\Financial\Payout;
 
 class Settlement extends Model
 {
@@ -67,7 +68,18 @@ class Settlement extends Model
     {
         return $this->morphTo();
     }
+    public function approve($user)
+    {
+        if ($this->status !== 'pending') {
+            throw new \Exception('Only pending settlements can be approved');
+        }
 
+        $this->update([
+            'status' => 'approved',
+            'approved_by' => $user->id,
+            'approved_at' => now(),
+        ]);
+    }
     public function vendor()
     {
         return $this->belongsTo(Vendor::class, 'vendor_id');
@@ -87,7 +99,10 @@ class Settlement extends Model
     {
         return $this->hasMany(Transaction::class, 'settlement_id');
     }
-
+    public function payout()
+    {
+        return $this->hasOne(Payout::class, 'settlement_id');
+    }
     public function orders()
     {
         return $this->hasMany(Order::class, 'settlement_id');

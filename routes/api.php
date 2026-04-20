@@ -34,9 +34,9 @@ Route::prefix('v1')->group(function () {
     });
 
 
-// ADD THIS - Public countries endpoint for registration
-Route::get('countries', [Api\CountryController::class, 'index']);
-Route::get('countries/{code}', [Api\CountryController::class, 'show']);
+    // ADD THIS - Public countries endpoint for registration
+    Route::get('countries', [Api\CountryController::class, 'index']);
+    Route::get('countries/{code}', [Api\CountryController::class, 'show']);
 
 
 
@@ -236,6 +236,7 @@ Route::get('countries/{code}', [Api\CountryController::class, 'show']);
             Route::delete('{id}/domain/{domainId}', [Api\Vendor\VendorStoreController::class, 'removeDomain']);
         });
 
+
         // Product Management
         Route::prefix('products')->group(function () {
             Route::get('/', [Api\Vendor\VendorProductController::class, 'index']);
@@ -371,6 +372,17 @@ Route::get('countries/{code}', [Api\CountryController::class, 'show']);
             Route::put('{id}/plan', [Api\Admin\AdminVendorController::class, 'updatePlan']);
             Route::post('{id}/kyc-verify', [Api\Admin\AdminVendorController::class, 'verifyKyc']);
             Route::post('{id}/kyc-reject', [Api\Admin\AdminVendorController::class, 'rejectKyc']);
+        });
+        // Store Management
+        Route::prefix('stores')->group(function () {
+            Route::get('/', [Api\admin\AdminStoreController::class, 'index']);
+            Route::get('{uuid}', [Api\admin\AdminStoreController::class, 'show']);
+            Route::put('{id}', [Api\admin\AdminStoreController::class, 'update']);
+            Route::delete('{id}', [Api\admin\AdminStoreController::class, 'destroy']);
+            Route::post('{id}/activate', [Api\admin\AdminStoreController::class, 'activate']);
+            Route::post('{id}/deactivate', [Api\admin\AdminStoreController::class, 'deactivate']);
+            Route::post('{id}/domain', [Api\admin\AdminStoreController::class, 'addDomain']);
+            Route::get('{id}/stats', [Api\admin\AdminStoreController::class, 'stats']);
         });
 
         // Product Management

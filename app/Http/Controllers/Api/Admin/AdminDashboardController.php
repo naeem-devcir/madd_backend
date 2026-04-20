@@ -75,7 +75,7 @@ class AdminDashboardController extends Controller
      */
     public function statistics(Request $request)
     {
-        $period = $request->get('period', '30_days');
+        $period = $request->input('period', '30_days');
 
         $days = match ($period) {
             '7_days' => 7,

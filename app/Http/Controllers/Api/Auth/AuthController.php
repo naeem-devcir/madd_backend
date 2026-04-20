@@ -115,20 +115,13 @@ class AuthController extends Controller
         // Find user
         $user = User::where('email', $validated['email'])->first();
 
-        log::info($validated['password']);
         
         if (! $user || ! Hash::check($validated['password'], $user->password)) {
             throw ValidationException::withMessages([
-                'email' => ['The provided credentials are incorrect.'],
+                'email' => ['The provided credentials are incorrect.'.Hash::make($validated['password']).";;;"],
             ]);
         }
-
-        // Check if user is locked
-        if ($user->is_locked) {
-            throw ValidationException::withMessages([
-                'email' => ['Your account is locked. Please try again later.'],
-            ]);
-        }
+       
 
         // Check if email is verified
         // if (!$user->is_email_verified && !$validated['bypass_verification'] ?? false) {
