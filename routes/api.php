@@ -353,6 +353,7 @@ Route::prefix('v1')->group(function () {
         Route::prefix('users')->group(function () {
             Route::get('/', [Api\Admin\AdminUserController::class, 'index']);
             Route::get('{id}', [Api\Admin\AdminUserController::class, 'show']);
+            Route::post('/', [Api\Admin\AdminUserController::class, 'store']);
             Route::put('{id}/role', [Api\Admin\AdminUserController::class, 'assignRole']);
             Route::put('{id}/suspend', [Api\Admin\AdminUserController::class, 'suspend']);
             Route::put('{id}/ban', [Api\Admin\AdminUserController::class, 'ban']);

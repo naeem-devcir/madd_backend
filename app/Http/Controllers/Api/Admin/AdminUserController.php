@@ -158,9 +158,9 @@ class AdminUserController extends Controller
             'phone' => 'nullable|string|max:20',
             'user_type' => 'required|in:admin,vendor,customer,mlm_agent',
             'country_code' => 'required|string|size:2',
-            'locale' => 'string|size:2',
-            'timezone' => 'string',
-            'status' => 'in:active,suspended,pending,banned',
+            'locale' => 'nullable|string|size:2',  // Made nullable
+            'timezone' => 'nullable|string',       // Made nullable
+            'status' => 'nullable|in:active,suspended,pending,banned',
             'roles' => 'nullable|array',
             'roles.*' => 'exists:roles,name',
             'permissions' => 'nullable|array',
@@ -171,8 +171,9 @@ class AdminUserController extends Controller
 
         try {
             $user = User::create([
+                'uuid' => (string) \Illuminate\Support\Str::uuid(), // Add this
                 'email' => $validated['email'],
-                'password' => $validated['password'],
+                'password' => Hash::make($validated['password']), // Hash password
                 'first_name' => $validated['first_name'],
                 'last_name' => $validated['last_name'],
                 'phone' => $validated['phone'] ?? null,
@@ -185,14 +186,14 @@ class AdminUserController extends Controller
             ]);
 
             // Assign roles
-            if (isset($validated['roles'])) {
+            if (isset($validated['roles']) && !empty($validated['roles'])) {
                 $user->syncRoles($validated['roles']);
             } else {
                 $user->assignRole($validated['user_type']);
             }
 
             // Assign direct permissions
-            if (isset($validated['permissions'])) {
+            if (isset($validated['permissions']) && !empty($validated['permissions'])) {
                 $user->syncPermissions($validated['permissions']);
             }
 
@@ -201,15 +202,29 @@ class AdminUserController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'User created successfully',
-                'data' => new UserResource($user->load('roles')),
+                'data' => new UserResource($user->load('roles', 'permissions')),
             ], 201);
-        } catch (\Exception $e) {
+        } catch (\Illuminate\Database\QueryException $e) {
             DB::rollBack();
+
+            if ($e->errorInfo[1] == 1062) { // Duplicate entry
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Email already exists',
+                ], 422);
+            }
 
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create user',
                 'error' => $e->getMessage(),
+            ], 500);
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to create user: ' . $e->getMessage(),
             ], 500);
         }
     }
