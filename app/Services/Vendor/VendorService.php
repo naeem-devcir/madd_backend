@@ -36,7 +36,7 @@ class VendorService
 
             $vendor->update([
                 'status' => 'active',
-                'approved_by' => $approver->uuid,
+                'approved_by' => $approver->id,
                 'approved_at' => now(),
                 'magento_website_id' => $magentoData['website_id'],
             ]);

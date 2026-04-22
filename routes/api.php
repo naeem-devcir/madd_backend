@@ -463,8 +463,14 @@ Route::prefix('v1')->group(function () {
         });
 
         // Vendor Plans
+        // Route::apiResource('plans', Api\Admin\AdminPlanController::class);
+        // Route::post('plans/{id}/set-default', [Api\Admin\AdminPlanController::class, 'setDefault']);
+
         Route::apiResource('plans', Api\Admin\AdminPlanController::class);
         Route::post('plans/{id}/set-default', [Api\Admin\AdminPlanController::class, 'setDefault']);
+        Route::get('plans/stats', [Api\Admin\AdminPlanController::class, 'stats']);
+        Route::post('plans/{id}/toggle-active', [Api\Admin\AdminPlanController::class, 'toggleActive']);
+        Route::post('plans/sort-order', [Api\Admin\AdminPlanController::class, 'updateSortOrder']);
 
         // MLM Management
         Route::prefix('mlm')->group(function () {

@@ -9,6 +9,7 @@ use App\Models\Vendor\VendorPlan;
 use App\Services\Vendor\VendorService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class AdminVendorController extends Controller
 {
@@ -45,11 +46,11 @@ class AdminVendorController extends Controller
 
         if ($request->has('search')) {
             $query->where(function ($q) use ($request) {
-                $q->where('company_name', 'like', '%'.$request->search.'%')
-                    ->orWhere('company_slug', 'like', '%'.$request->search.'%')
-                    ->orWhere('vat_number', 'like', '%'.$request->search.'%')
+                $q->where('company_name', 'like', '%' . $request->search . '%')
+                    ->orWhere('company_slug', 'like', '%' . $request->search . '%')
+                    ->orWhere('vat_number', 'like', '%' . $request->search . '%')
                     ->orWhereHas('user', function ($sub) use ($request) {
-                        $sub->where('email', 'like', '%'.$request->search.'%');
+                        $sub->where('email', 'like', '%' . $request->search . '%');
                     });
             });
         }
@@ -73,8 +74,11 @@ class AdminVendorController extends Controller
      */
     public function show($id)
     {
-        $vendor = Vendor::with(['user', 'plan', 'stores', 'bankAccounts', 'products', 'orders', 'settlements'])
-            ->findOrFail($id);
+        // $vendor = Vendor::with(['user', 'plan', 'stores', 'bankAccounts', 'products', 'orders', 'settlements'])
+        //     ->findOrFail($id);
+            $vendor = Vendor::with(['user', 'plan', 'stores', 'bankAccounts', 'products', 'orders', 'settlements'])
+            ->where('uuid', $id)
+            ->firstOrFail();
 
         return response()->json([
             'success' => true,
@@ -87,8 +91,9 @@ class AdminVendorController extends Controller
      */
     public function approve(Request $request, $id)
     {
-        $vendor = Vendor::findOrFail($id);
-
+        // $vendor = Vendor::findOrFail($id);
+        $vendor = Vendor::where('uuid', $id)->firstOrFail();
+        
         if ($vendor->status !== 'pending') {
             return response()->json([
                 'success' => false,
@@ -108,7 +113,6 @@ class AdminVendorController extends Controller
                 'message' => 'Vendor approved successfully',
                 'data' => new VendorResource($vendor->fresh()),
             ]);
-
         } catch (\Exception $e) {
             DB::rollBack();
 
@@ -129,7 +133,8 @@ class AdminVendorController extends Controller
             'reason' => 'required|string',
         ]);
 
-        $vendor = Vendor::findOrFail($id);
+        // $vendor = Vendor::findOrFail($id);
+         $vendor = Vendor::where('uuid', $id)->firstOrFail();
 
         DB::beginTransaction();
 
@@ -143,7 +148,6 @@ class AdminVendorController extends Controller
                 'message' => 'Vendor suspended successfully',
                 'data' => new VendorResource($vendor->fresh()),
             ]);
-
         } catch (\Exception $e) {
             DB::rollBack();
 
@@ -160,7 +164,8 @@ class AdminVendorController extends Controller
      */
     public function activate($id)
     {
-        $vendor = Vendor::findOrFail($id);
+        // $vendor = Vendor::findOrFail($id);
+        $vendor = Vendor::where('uuid', $id)->firstOrFail();
 
         if ($vendor->status !== 'suspended') {
             return response()->json([
@@ -181,7 +186,6 @@ class AdminVendorController extends Controller
                 'message' => 'Vendor activated successfully',
                 'data' => new VendorResource($vendor->fresh()),
             ]);
-
         } catch (\Exception $e) {
             DB::rollBack();
 
@@ -203,12 +207,15 @@ class AdminVendorController extends Controller
             'duration_months' => 'sometimes|integer|min:1|max:36',
         ]);
 
-        $vendor = Vendor::findOrFail($id);
+        // $vendor = Vendor::findOrFail($id);
+        $vendor = Vendor::where('uuid', $id)->firstOrFail();
+
         $plan = VendorPlan::findOrFail($request->plan_id);
 
         DB::beginTransaction();
 
         try {
+  
             $vendor->updatePlan($plan, $request->duration_months ?? 12);
 
             DB::commit();
@@ -218,7 +225,6 @@ class AdminVendorController extends Controller
                 'message' => 'Vendor plan updated successfully',
                 'data' => new VendorResource($vendor->fresh()),
             ]);
-
         } catch (\Exception $e) {
             DB::rollBack();
 
@@ -274,9 +280,20 @@ class AdminVendorController extends Controller
                 ->with('plan')
                 ->groupBy('plan_id')
                 ->get(),
+            // 'revenue' => [
+            //     'total_commission' => Vendor::sum('total_commission_paid'),
+            //     // Fixed: MySQL compatible version
+            //     'avg_monthly' => Vendor::where('created_at', '<=', now())
+            //         ->where('total_commission_paid', '>', 0)
+            //         ->selectRaw('AVG(total_commission_paid / GREATEST(TIMESTAMPDIFF(MONTH, created_at, NOW()), 1)) as avg_monthly')
+            //         ->value('avg_monthly') ?? 0,
+            // ],
             'revenue' => [
                 'total_commission' => Vendor::sum('total_commission_paid'),
-                'avg_monthly' => Vendor::avg(DB::raw('total_commission_paid / GREATEST(EXTRACT(MONTH FROM AGE(NOW(), created_at)), 1)')),
+                'avg_monthly' => Vendor::where('created_at', '<=', now())
+                    ->where('total_commission_paid', '>', 0)
+                    ->selectRaw('AVG(total_commission_paid / GREATEST(TIMESTAMPDIFF(MONTH, created_at, NOW()), 1)) as avg_monthly')
+                    ->value('avg_monthly') ?? 0,
             ],
         ];
 
@@ -310,4 +327,3 @@ class AdminVendorController extends Controller
         ], 501);
     }
 }
-

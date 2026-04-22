@@ -10,6 +10,7 @@ use App\Services\Auth\PermissionService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\log;
 
 class AdminUserController extends Controller
 {
@@ -54,10 +55,10 @@ class AdminUserController extends Controller
 
         if ($request->has('search')) {
             $query->where(function ($q) use ($request) {
-                $q->where('email', 'like', '%'.$request->search.'%')
-                    ->orWhere('first_name', 'like', '%'.$request->search.'%')
-                    ->orWhere('last_name', 'like', '%'.$request->search.'%')
-                    ->orWhere('phone', 'like', '%'.$request->search.'%');
+                $q->where('email', 'like', '%' . $request->search . '%')
+                    ->orWhere('first_name', 'like', '%' . $request->search . '%')
+                    ->orWhere('last_name', 'like', '%' . $request->search . '%')
+                    ->orWhere('phone', 'like', '%' . $request->search . '%');
             });
         }
 
@@ -108,8 +109,13 @@ class AdminUserController extends Controller
      */
     public function show($id)
     {
+
+
+        // $user = User::with(['roles', 'permissions', 'vendor', 'mlmAgent', 'socialAccounts'])
+        //     ->findOrFail($id);
         $user = User::with(['roles', 'permissions', 'vendor', 'mlmAgent', 'socialAccounts'])
-            ->findOrFail($id);
+            ->where('uuid', $id)
+            ->firstOrFail();
 
         // Get user statistics
         $stats = [
@@ -122,7 +128,7 @@ class AdminUserController extends Controller
         ];
 
         // Get login history (last 10)
-        $loginHistory = DB::table('login_logs')
+        $loginHistory = DB::table('user_sessions')
             ->where('user_id', $user->id)
             ->orderBy('created_at', 'desc')
             ->limit(10)
@@ -197,7 +203,6 @@ class AdminUserController extends Controller
                 'message' => 'User created successfully',
                 'data' => new UserResource($user->load('roles')),
             ], 201);
-
         } catch (\Exception $e) {
             DB::rollBack();
 
@@ -219,7 +224,7 @@ class AdminUserController extends Controller
         $validated = $request->validate([
             'first_name' => 'sometimes|string|max:100',
             'last_name' => 'sometimes|string|max:100',
-            'phone' => 'nullable|string|max:20|unique:users,phone,'.$user->id,
+            'phone' => 'nullable|string|max:20|unique:users,phone,' . $user->id,
             'country_code' => 'sometimes|string|size:2',
             'locale' => 'sometimes|string|size:2',
             'timezone' => 'sometimes|string',
@@ -244,7 +249,6 @@ class AdminUserController extends Controller
                 'message' => 'User updated successfully',
                 'data' => new UserResource($user->fresh()),
             ]);
-
         } catch (\Exception $e) {
             DB::rollBack();
 
@@ -454,60 +458,87 @@ class AdminUserController extends Controller
      */
     public function destroy($id)
     {
-        $user = User::findOrFail($id);
-
-        if ($user->is_super_admin) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Cannot delete super admin user',
-            ], 422);
-        }
-
-        // Check if user has orders
-        if ($user->orders()->count() > 0) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Cannot delete user with existing orders. Anonymize instead.',
-            ], 422);
-        }
-
-        DB::beginTransaction();
-
         try {
-            // Anonymize user data for GDPR compliance
-            $user->update([
-                'email' => 'deleted_'.$user->id.'@example.com',
-                'phone' => null,
-                'first_name' => 'Deleted',
-                'last_name' => 'User',
-                'avatar_url' => null,
-                'password' => null,
-                'status' => 'deleted',
-                'email_verified_at' => null,
-                'magento_customer_id' => null,
-                'two_factor_secret' => null,
-                'gdpr_consent_at' => null,
-                'preferences' => null,
-                'metadata' => array_merge($user->metadata ?? [], ['deleted_at' => now()->toIso8601String()]),
-            ]);
+            Log::info('Deleting user with UUID: ' . $id);
 
-            // Revoke all tokens
-            $user->tokens()->delete();
+            // Find user by UUID
+            $user = User::where('uuid', $id)->firstOrFail();
 
-            DB::commit();
+            // Check if super admin
+            if ($user->is_super_admin) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cannot delete super admin user',
+                ], 422);
+            }
 
+            // Check if user has orders
+            if ($user->orders()->count() > 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cannot delete user with existing orders. Anonymize instead.',
+                ], 422);
+            }
+
+            DB::beginTransaction();
+
+            try {
+                // Anonymize user data
+                $user->update([
+                    'email' => 'deleted_' . $user->id . '_' . time() . '@deleted.com',
+                    'phone' => null,
+                    'first_name' => 'Deleted',
+                    'last_name' => 'User',
+                    'avatar_url' => null,
+                    'status' => 'banned', // Use 'banned' instead of 'deleted'
+                    'email_verified_at' => null,
+                    'gdpr_consent_at' => null,
+                    'magento_customer_id' => null,
+                    'two_factor_secret' => null,
+                    'metadata' => json_encode(array_merge(
+                        json_decode($user->metadata ?? '{}', true) ?? [],
+                        ['deleted_at' => now()->toIso8601String()]
+                    )),
+                    'preferences' => null,
+                    'is_email_verified' => false,
+                    'is_phone_verified' => false,
+                    'is_kyc_verified' => false,
+                    'login_attempts' => 0,
+                    'locked_until' => null,
+                    'user_signin_method' => null,
+                    'marketing_opt_in' => null,
+                ]);
+
+                // Revoke all tokens
+                if (method_exists($user, 'tokens')) {
+                    $user->tokens()->delete();
+                }
+
+                // Soft delete the user
+                $user->delete();
+
+                DB::commit();
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'User deleted successfully',
+                ]);
+            } catch (\Exception $e) {
+                DB::rollBack();
+                throw $e;
+            }
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
-                'success' => true,
-                'message' => 'User anonymized successfully',
-            ]);
-
+                'success' => false,
+                'message' => 'User not found',
+            ], 404);
         } catch (\Exception $e) {
-            DB::rollBack();
+            Log::error('Delete user error: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
 
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to delete user',
-                'error' => $e->getMessage(),
+                'message' => 'Failed to delete user: ' . $e->getMessage(),
             ], 500);
         }
     }
@@ -535,7 +566,7 @@ class AdminUserController extends Controller
             ], 422);
         }
 
-        $token = $adminUser->createToken('impersonation_'.$user->id, ['impersonating', 'user_id:'.$user->id])->plainTextToken;
+        $token = $adminUser->createToken('impersonation_' . $user->id, ['impersonating', 'user_id:' . $user->id])->plainTextToken;
 
         return response()->json([
             'success' => true,
@@ -631,14 +662,24 @@ class AdminUserController extends Controller
 
         $users = $query->get();
 
-        $filename = 'users_export_'.date('Y-m-d_His').'.csv';
+        $filename = 'users_export_' . date('Y-m-d_His') . '.csv';
         $handle = fopen('php://temp', 'w');
 
         // Headers
         fputcsv($handle, [
-            'ID', 'Email', 'First Name', 'Last Name', 'Phone',
-            'User Type', 'Status', 'KYC Status', 'Country',
-            'Email Verified', 'Created At', 'Last Login', 'Roles',
+            'ID',
+            'Email',
+            'First Name',
+            'Last Name',
+            'Phone',
+            'User Type',
+            'Status',
+            'KYC Status',
+            'Country',
+            'Email Verified',
+            'Created At',
+            'Last Login',
+            'Roles',
         ]);
 
         // Data
@@ -675,4 +716,3 @@ class AdminUserController extends Controller
         ]);
     }
 }
-

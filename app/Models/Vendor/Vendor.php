@@ -14,10 +14,12 @@ use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use App\Traits\VendorStatusTrait;
+
 
 class Vendor extends Model
 {
-    use HasFactory, HasUuid, SoftDeletes;
+    use HasFactory, HasUuid, SoftDeletes, VendorStatusTrait;
 
     protected $table = 'vendors';
 
@@ -44,6 +46,7 @@ class Vendor extends Model
         'plan_id',
         'plan_starts_at',
         'plan_ends_at',
+        'plan_duration_months',
         'status',
         'onboarding_step',
         'commission_rate',
@@ -69,6 +72,7 @@ class Vendor extends Model
     protected $casts = [
         'plan_starts_at' => 'datetime',
         'plan_ends_at' => 'datetime',
+        'plan_duration_months' => 'integer',
         'approved_at' => 'datetime',
         'verification_documents' => 'array',
         'metadata' => 'array',
@@ -82,6 +86,43 @@ class Vendor extends Model
         'rating_average' => 'decimal:2',
         'onboarding_step' => 'integer',
     ];
+
+
+    /**
+     * Update vendor's plan
+     */
+    public function updatePlan(VendorPlan $plan, int $durationMonths = 12): void
+    {
+        $this->update([
+            'plan_id' => $plan->id,
+            'plan_starts_at' => now(),
+            'plan_ends_at' => now()->addMonths($durationMonths),
+            'plan_duration_months' => $durationMonths,
+        ]);
+    }
+
+    /**
+     * Check if plan is expired
+     */
+    public function isPlanExpired(): bool
+    {
+        return $this->plan_expires_at && now()->gt($this->plan_expires_at);
+    }
+
+    /**
+     * Get remaining plan days
+     */
+    public function getRemainingPlanDays(): ?int
+    {
+        if (!$this->plan_expires_at) {
+            return null;
+        }
+
+        $days = now()->diffInDays($this->plan_expires_at, false);
+        return $days > 0 ? $days : 0;
+    }
+
+
 
     public function user()
     {

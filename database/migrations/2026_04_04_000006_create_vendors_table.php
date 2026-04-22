@@ -38,6 +38,9 @@ return new class extends Migration
             $table->foreignId('plan_id')->nullable()->constrained('vendor_plans')->nullOnDelete();
             $table->timestamp('plan_starts_at')->nullable();
             $table->timestamp('plan_ends_at')->nullable();
+            
+            // ADD MISSING COLUMNS HERE
+            $table->integer('plan_duration_months')->nullable()->after('plan_expires_at');
 
             // Commission
             $table->decimal('commission_rate', 5, 2)->nullable();
