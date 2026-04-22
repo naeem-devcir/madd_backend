@@ -8,7 +8,6 @@ return new class extends Migration
     {
         Schema::create('permissions', function (Blueprint $table) {
             $table->id();
-            $table->uuid('uuid')->unique();
             $table->string('name')->unique();
             $table->string('display_name', 150);
             $table->text('description')->nullable();

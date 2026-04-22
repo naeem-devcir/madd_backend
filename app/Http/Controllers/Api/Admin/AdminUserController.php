@@ -219,7 +219,9 @@ class AdminUserController extends Controller
      */
     public function update(Request $request, $id)
     {
-        $user = User::findOrFail($id);
+        // $user = User::findOrFail($id);
+        $user = User::where('uuid', $id)->firstOrFail();
+
 
         $validated = $request->validate([
             'first_name' => 'sometimes|string|max:100',
@@ -266,10 +268,11 @@ class AdminUserController extends Controller
     public function assignRole(Request $request, $id)
     {
         $request->validate([
-            'role' => 'required|exists:roles,name',
+            'role' => 'required|in:admin,vendor,mlm_agent,customer',
         ]);
 
-        $user = User::findOrFail($id);
+        // $user = User::findOrFail($id);
+        $user = User::where('uuid', $id)->firstOrFail();
         $user->assignRole($request->role);
 
         return response()->json([
@@ -291,7 +294,9 @@ class AdminUserController extends Controller
             'role' => 'required|exists:roles,name',
         ]);
 
-        $user = User::findOrFail($id);
+        // $user = User::findOrFail($id);
+        $user = User::where('uuid', $id)->firstOrFail();
+
         $user->removeRole($request->role);
 
         return response()->json([
@@ -335,7 +340,10 @@ class AdminUserController extends Controller
             'permission' => 'required|exists:permissions,name',
         ]);
 
-        $user = User::findOrFail($id);
+        // $user = User::findOrFail($id);
+        $user = User::where('uuid', $id)->firstOrFail();
+
+
         $user->revokePermissionTo($request->permission);
 
         return response()->json([
@@ -357,7 +365,8 @@ class AdminUserController extends Controller
             'reason' => 'required|string',
         ]);
 
-        $user = User::findOrFail($id);
+        // $user = User::findOrFail($id);
+        $user = User::where('uuid', $id)->firstOrFail();
 
         if ($user->is_super_admin) {
             return response()->json([
@@ -392,12 +401,13 @@ class AdminUserController extends Controller
      */
     public function activate($id)
     {
-        $user = User::findOrFail($id);
+        // $user = User::findOrFail($id);
+        $user = User::where('uuid', $id)->firstOrFail();
 
-        if ($user->status !== 'suspended') {
+        if (!in_array($user->status, ['suspended', 'banned'])) {
             return response()->json([
                 'success' => false,
-                'message' => 'User is not suspended',
+                'message' => 'User is not suspended or banned',
             ], 422);
         }
 
@@ -423,7 +433,9 @@ class AdminUserController extends Controller
             'reason' => 'required|string',
         ]);
 
-        $user = User::findOrFail($id);
+        // $user = User::findOrFail($id);
+        $user = User::where('uuid', $id)->firstOrFail();
+
 
         if ($user->is_super_admin) {
             return response()->json([
@@ -458,12 +470,16 @@ class AdminUserController extends Controller
      */
     public function destroy($id)
     {
+
         try {
-            Log::info('Deleting user with UUID: ' . $id);
+            // Log::info('Deleting user with UUID: ' . $id);
 
             // Find user by UUID
             $user = User::where('uuid', $id)->firstOrFail();
-
+            Log::info('User Orders:', [
+                'user_id' => $user->id,
+                'orders' => $user->orders()->get()->toArray(),
+            ]);
             // Check if super admin
             if ($user->is_super_admin) {
                 return response()->json([
@@ -471,6 +487,7 @@ class AdminUserController extends Controller
                     'message' => 'Cannot delete super admin user',
                 ], 422);
             }
+
 
             // Check if user has orders
             if ($user->orders()->count() > 0) {
@@ -550,23 +567,30 @@ class AdminUserController extends Controller
     {
         $adminUser = auth()->user();
 
-        if (! $adminUser->can_impersonate) {
+        // ✅ Permission check (BEST PRACTICE)
+        if (! $adminUser->can('impersonate users')) {
             return response()->json([
                 'success' => false,
                 'message' => 'You do not have permission to impersonate users',
             ], 403);
         }
 
-        $user = User::findOrFail($id);
+        // ✅ Get user by UUID
+        $user = User::where('uuid', $id)->firstOrFail();
 
-        if (! $user->can_be_impersonated) {
+        // ❌ Prevent impersonating privileged accounts
+        if ($user->hasRole(['super_admin', 'admin'])) {
             return response()->json([
                 'success' => false,
                 'message' => 'This user cannot be impersonated',
-            ], 422);
+            ], 403);
         }
 
-        $token = $adminUser->createToken('impersonation_' . $user->id, ['impersonating', 'user_id:' . $user->id])->plainTextToken;
+        // ✅ Create impersonation token
+        $token = $adminUser->createToken(
+            'impersonation_' . $user->id,
+            ['impersonate:' . $user->id]
+        )->plainTextToken;
 
         return response()->json([
             'success' => true,

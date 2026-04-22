@@ -355,9 +355,10 @@ Route::prefix('v1')->group(function () {
             Route::get('{id}', [Api\Admin\AdminUserController::class, 'show']);
             Route::put('{id}/role', [Api\Admin\AdminUserController::class, 'assignRole']);
             Route::put('{id}/suspend', [Api\Admin\AdminUserController::class, 'suspend']);
+            Route::put('{id}/ban', [Api\Admin\AdminUserController::class, 'ban']);
             Route::put('{id}/activate', [Api\Admin\AdminUserController::class, 'activate']);
             Route::delete('{id}', [Api\Admin\AdminUserController::class, 'destroy']);
-            Route::post('{id}/impersonate', [Api\Admin\AdminUserController::class, 'impersonate']);
+            // Route::post('{id}/impersonate', [Api\Admin\AdminUserController::class, 'impersonate']);
         });
 
         // Vendor Management
@@ -370,8 +371,8 @@ Route::prefix('v1')->group(function () {
             Route::post('{id}/suspend', [Api\Admin\AdminVendorController::class, 'suspend']);
             Route::post('{id}/activate', [Api\Admin\AdminVendorController::class, 'activate']);
             Route::put('{id}/plan', [Api\Admin\AdminVendorController::class, 'updatePlan']);
-            Route::post('{id}/kyc-verify', [Api\Admin\AdminVendorController::class, 'verifyKyc']);
-            Route::post('{id}/kyc-reject', [Api\Admin\AdminVendorController::class, 'rejectKyc']);
+            // Route::post('{id}/kyc-verify', [Api\Admin\AdminVendorController::class, 'verifyKyc']);
+            // Route::post('{id}/kyc-reject', [Api\Admin\AdminVendorController::class, 'rejectKyc']);
         });
         // Store Management
         Route::prefix('stores')->group(function () {
