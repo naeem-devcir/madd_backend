@@ -40,7 +40,7 @@ return new class extends Migration
             $table->timestamp('plan_ends_at')->nullable();
             
             // ADD MISSING COLUMNS HERE
-            $table->integer('plan_duration_months')->nullable()->after('plan_expires_at');
+            $table->integer('plan_duration_months')->nullable();
 
             // Commission
             $table->decimal('commission_rate', 5, 2)->nullable();
