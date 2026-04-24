@@ -352,6 +352,7 @@ Route::prefix('v1')->group(function () {
         // User Management
         Route::prefix('users')->group(function () {
             Route::get('/', [Api\Admin\AdminUserController::class, 'index']);
+            Route::post('/', [Api\Admin\AdminVendorController::class, 'store']);
             Route::get('{id}', [Api\Admin\AdminUserController::class, 'show']);
             Route::post('/', [Api\Admin\AdminUserController::class, 'store']);
             Route::put('{id}/role', [Api\Admin\AdminUserController::class, 'assignRole']);
@@ -359,12 +360,13 @@ Route::prefix('v1')->group(function () {
             Route::put('{id}/ban', [Api\Admin\AdminUserController::class, 'ban']);
             Route::put('{id}/activate', [Api\Admin\AdminUserController::class, 'activate']);
             Route::delete('{id}', [Api\Admin\AdminUserController::class, 'destroy']);
-            // Route::post('{id}/impersonate', [Api\Admin\AdminUserController::class, 'impersonate']);
+            Route::post('{id}/impersonate', [Api\Admin\AdminUserController::class, 'impersonate']);
         });
 
         // Vendor Management
         Route::prefix('vendors')->group(function () {
             Route::get('/', [Api\Admin\AdminVendorController::class, 'index']);
+            Route::post('/', [Api\Admin\AdminVendorController::class, 'store']);
             Route::get('statistics', [Api\Admin\AdminVendorController::class, 'statistics']);
             Route::get('applications', [Api\Admin\AdminVendorController::class, 'applications']);
             Route::get('{id}', [Api\Admin\AdminVendorController::class, 'show']);
@@ -377,14 +379,19 @@ Route::prefix('v1')->group(function () {
         });
         // Store Management
         Route::prefix('stores')->group(function () {
-            Route::get('/', [Api\admin\AdminStoreController::class, 'index']);
-            Route::get('{uuid}', [Api\admin\AdminStoreController::class, 'show']);
-            Route::put('{id}', [Api\admin\AdminStoreController::class, 'update']);
-            Route::delete('{id}', [Api\admin\AdminStoreController::class, 'destroy']);
-            Route::post('{id}/activate', [Api\admin\AdminStoreController::class, 'activate']);
-            Route::post('{id}/deactivate', [Api\admin\AdminStoreController::class, 'deactivate']);
-            Route::post('{id}/domain', [Api\admin\AdminStoreController::class, 'addDomain']);
-            Route::get('{id}/stats', [Api\admin\AdminStoreController::class, 'stats']);
+            Route::get('/', [Api\Admin\AdminStoreController::class, 'index']);
+            Route::post('/', [Api\Admin\AdminStoreController::class, 'store']); // ADDED: Create store
+            Route::get('by-vendor/{vendorId}', [Api\Admin\AdminStoreController::class, 'getStoresByVendor']); // ADDED: Get stores by vendor
+            Route::post('bulk-status', [Api\Admin\AdminStoreController::class, 'bulkStatusUpdate']); // ADDED: Bulk status update
+            Route::get('{uuid}', [Api\Admin\AdminStoreController::class, 'show']);
+            Route::put('{id}', [Api\Admin\AdminStoreController::class, 'update']);
+            Route::delete('{id}', [Api\Admin\AdminStoreController::class, 'destroy']);
+            Route::delete('{id}/force', [Api\Admin\AdminStoreController::class, 'forceDelete']); // ADDED: Force delete
+            Route::post('{id}/restore', [Api\Admin\AdminStoreController::class, 'restore']); // ADDED: Restore soft-deleted
+            Route::post('{id}/activate', [Api\Admin\AdminStoreController::class, 'activate']);
+            Route::post('{id}/deactivate', [Api\Admin\AdminStoreController::class, 'deactivate']);
+            Route::post('{id}/domain', [Api\Admin\AdminStoreController::class, 'addDomain']);
+            Route::get('{id}/stats', [Api\Admin\AdminStoreController::class, 'stats']);
         });
 
         // Product Management

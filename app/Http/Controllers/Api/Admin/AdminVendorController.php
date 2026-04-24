@@ -3,13 +3,19 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\Admin\StoreVendorRequest;
 use App\Http\Resources\VendorResource;
+use App\Models\User;
 use App\Models\Vendor\Vendor;
 use App\Models\Vendor\VendorPlan;
 use App\Services\Vendor\VendorService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
+
+
 
 class AdminVendorController extends Controller
 {
@@ -68,6 +74,113 @@ class AdminVendorController extends Controller
             ],
         ]);
     }
+    /**
+     * Create a new vendor (admin adds vendor manually)
+     */
+    public function store(StoreVendorRequest $request)
+    {
+        DB::beginTransaction();
+
+        try {
+            // 1. Create the user account
+            $user = User::create([
+                'uuid' => (string) Str::uuid(),
+                'email' => $request->email,
+                'password' => Hash::make($request->password),
+                'first_name' => $request->first_name,
+                'last_name' => $request->last_name,
+                'phone' => $request->phone,
+                'user_type' => 'vendor',
+                'status' => 'active',
+                'country_code' => $request->country_code,
+                'is_super_admin' => false,
+                'is_email_verified' => true, // Admin-created, assume verified
+                'is_phone_verified' => false,
+                'is_kyc_verified' => $request->kyc_status === 'verified',
+                'kyc_status' => $request->kyc_status ?? 'pending',
+                'timezone' => $request->timezone ?? 'UTC',
+                'created_by' => auth()->id(),
+            ]);
+
+            // 2. Handle plan dates if plan is selected
+            $planStartsAt = null;
+            $planEndsAt = null;
+            $planDurationMonths = $request->plan_duration_months ?? 12;
+
+            if ($request->plan_id) {
+                $planStartsAt = now();
+                $planEndsAt = now()->addMonths($planDurationMonths);
+            }
+
+            // 3. Generate a unique slug if not provided
+            $slug = $request->company_slug;
+            if (Vendor::where('company_slug', $slug)->exists()) {
+                $slug = $slug . '-' . Str::random(4);
+            }
+
+            // 4. Create the vendor record
+            $vendor = Vendor::create([
+                'uuid' => (string) Str::uuid(),
+                'user_id' => $user->id,
+                'company_name' => $request->company_name,
+                'company_slug' => $slug,
+                'legal_name' => $request->legal_name,
+                'trading_name' => $request->trading_name,
+                'vat_number' => $request->vat_number,
+                'registration_number' => $request->registration_number,
+                'contact_email' => $request->contact_email ?? $request->email,
+                'phone' => $request->phone,
+                'website' => $request->website,
+                'country_code' => $request->country_code,
+                'address_line1' => $request->address_line1,
+                'address_line2' => $request->address_line2,
+                'city' => $request->city,
+                'postal_code' => $request->postal_code,
+                'logo_url' => $request->logo_url,
+                'banner_url' => $request->banner_url,
+                'description' => $request->description,
+                'plan_id' => $request->plan_id,
+                'plan_starts_at' => $planStartsAt,
+                'plan_ends_at' => $planEndsAt,
+                'plan_duration_months' => $planDurationMonths,
+                'commission_rate' => $request->commission_rate,
+                'commission_type' => $request->commission_type ?? 'percentage',
+                'status' => $request->status ?? 'pending',
+                'kyc_status' => $request->kyc_status ?? 'pending',
+                'onboarding_step' => $request->status === 'active' ? 5 : 1,
+                'timezone' => $request->timezone ?? 'UTC',
+                'metadata' => $request->metadata,
+                'approved_by' => $request->status === 'active' ? auth()->id() : null,
+                'approved_at' => $request->status === 'active' ? now() : null,
+            ]);
+
+            // 5. Send welcome email to vendor (optional)
+            // event(new VendorAccountCreated($user, $vendor, $request->password));
+
+            DB::commit();
+
+            // Load relationships for response
+            $vendor->load(['user', 'plan']);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Vendor created successfully',
+                'data' => new VendorResource($vendor),
+            ], 201);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Failed to create vendor', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'request_data' => $request->except(['password', 'password_confirmation']),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to create vendor: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
 
     /**
      * Get single vendor
@@ -76,7 +189,7 @@ class AdminVendorController extends Controller
     {
         // $vendor = Vendor::with(['user', 'plan', 'stores', 'bankAccounts', 'products', 'orders', 'settlements'])
         //     ->findOrFail($id);
-            $vendor = Vendor::with(['user', 'plan', 'stores', 'bankAccounts', 'products', 'orders', 'settlements'])
+        $vendor = Vendor::with(['user', 'plan', 'stores', 'bankAccounts', 'products', 'orders', 'settlements'])
             ->where('uuid', $id)
             ->firstOrFail();
 
@@ -93,7 +206,7 @@ class AdminVendorController extends Controller
     {
         // $vendor = Vendor::findOrFail($id);
         $vendor = Vendor::where('uuid', $id)->firstOrFail();
-        
+
         if ($vendor->status !== 'pending') {
             return response()->json([
                 'success' => false,
@@ -134,7 +247,7 @@ class AdminVendorController extends Controller
         ]);
 
         // $vendor = Vendor::findOrFail($id);
-         $vendor = Vendor::where('uuid', $id)->firstOrFail();
+        $vendor = Vendor::where('uuid', $id)->firstOrFail();
 
         DB::beginTransaction();
 
@@ -215,7 +328,7 @@ class AdminVendorController extends Controller
         DB::beginTransaction();
 
         try {
-  
+
             $vendor->updatePlan($plan, $request->duration_months ?? 12);
 
             DB::commit();

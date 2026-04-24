@@ -118,6 +118,7 @@ class AuthController extends Controller
         
         if (! $user || ! Hash::check($validated['password'], $user->password)) {
             throw ValidationException::withMessages([
+                // 'email' => ['The provided credentials are incorrect.'.Hash::make($validated['password']).";;;"],
                 'email' => ['The provided credentials are incorrect.'.Hash::make($validated['password']).";;;"],
             ]);
         }
