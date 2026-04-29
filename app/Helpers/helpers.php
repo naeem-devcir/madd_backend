@@ -92,8 +92,8 @@ if (!function_exists('cast_setting_value')) {
 if (!function_exists('get_setting_type')) {
     function get_setting_type($value)
     {
+        if (is_bool($value)) return 'boolean';  // ← must be BEFORE is_int
         if (is_int($value)) return 'integer';
-        if (is_bool($value)) return 'boolean';
         if (is_array($value)) return 'array';
         if (is_object($value)) return 'json';
         return 'string';

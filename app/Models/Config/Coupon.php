@@ -138,9 +138,9 @@ class Coupon extends Model
     public function getDiscountDisplayAttribute(): string
     {
         if ($this->discount_type === 'percentage') {
-            return $this->discount_value.'% OFF';
+            return $this->discount_value . '% OFF';
         } elseif ($this->discount_type === 'fixed_amount') {
-            return '€'.number_format($this->discount_value, 2).' OFF';
+            return '€' . number_format($this->discount_value, 2) . ' OFF';
         } elseif ($this->discount_type === 'free_shipping') {
             return 'Free Shipping';
         }
@@ -207,5 +207,39 @@ class Coupon extends Model
     {
         $this->sync_status = 'failed';
         $this->save();
+    }
+
+    public function getStatusLabelAttribute(): string
+    {
+        if (!$this->is_active) {
+            return 'Inactive';
+        }
+
+        if ($this->expires_at && $this->expires_at < now()) {
+            return 'Expired';
+        }
+
+        if ($this->starts_at && $this->starts_at > now()) {
+            return 'Scheduled';
+        }
+
+        return 'Active';
+    }
+
+    public function getStatusColorAttribute(): string
+    {
+        if (!$this->is_active) {
+            return 'gray';
+        }
+
+        if ($this->expires_at && $this->expires_at < now()) {
+            return 'red';
+        }
+
+        if ($this->starts_at && $this->starts_at > now()) {
+            return 'yellow';
+        }
+
+        return 'green';
     }
 }

@@ -77,11 +77,19 @@ class AdminVendorController extends Controller
     /**
      * Create a new vendor (admin adds vendor manually)
      */
-    public function store(StoreVendorRequest $request)
+    /**
+     * Create a new vendor (admin adds vendor manually)
+     */
+    public function store(Request $request)
     {
         DB::beginTransaction();
 
         try {
+            // Convert numeric values to proper types
+            $planDurationMonths = (int) ($request->plan_duration_months ?? 12);
+            $commissionRate = (float) ($request->commission_rate ?? 0);
+            $planId = $request->plan_id ? (int) $request->plan_id : null;
+
             // 1. Create the user account
             $user = User::create([
                 'uuid' => (string) Str::uuid(),
@@ -105,15 +113,18 @@ class AdminVendorController extends Controller
             // 2. Handle plan dates if plan is selected
             $planStartsAt = null;
             $planEndsAt = null;
-            $planDurationMonths = $request->plan_duration_months ?? 12;
 
-            if ($request->plan_id) {
+            if ($planId) {
                 $planStartsAt = now();
                 $planEndsAt = now()->addMonths($planDurationMonths);
             }
 
             // 3. Generate a unique slug if not provided
             $slug = $request->company_slug;
+            if (empty($slug)) {
+                $slug = Str::slug($request->company_name);
+            }
+
             if (Vendor::where('company_slug', $slug)->exists()) {
                 $slug = $slug . '-' . Str::random(4);
             }
@@ -139,11 +150,11 @@ class AdminVendorController extends Controller
                 'logo_url' => $request->logo_url,
                 'banner_url' => $request->banner_url,
                 'description' => $request->description,
-                'plan_id' => $request->plan_id,
+                'plan_id' => $planId,
                 'plan_starts_at' => $planStartsAt,
                 'plan_ends_at' => $planEndsAt,
                 'plan_duration_months' => $planDurationMonths,
-                'commission_rate' => $request->commission_rate,
+                'commission_rate' => $commissionRate,
                 'commission_type' => $request->commission_type ?? 'percentage',
                 'status' => $request->status ?? 'pending',
                 'kyc_status' => $request->kyc_status ?? 'pending',

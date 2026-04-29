@@ -38,7 +38,7 @@ class OrderResource extends JsonResource
                     'avatar' => $this->customer->avatar_url,
                 ];
             }),
-            'customer_name' => $this->customer_firstname.' '.$this->customer_lastname,
+            'customer_name' => $this->customer_firstname . ' ' . $this->customer_lastname,
             'customer_email' => $this->customer_email,
             'is_guest' => $this->is_guest_order,
 
@@ -50,6 +50,12 @@ class OrderResource extends JsonResource
                     'slug' => $this->vendor->company_slug,
                 ];
             }),
+
+            /**
+             * ✅ Added missing VendorStoreResource properly
+             * Make sure relationship name matches your Order model:
+             * public function vendorStore()
+             */
             'store' => $this->whenLoaded('vendorStore', function () {
                 return new VendorStoreResource($this->vendorStore);
             }),
@@ -57,13 +63,13 @@ class OrderResource extends JsonResource
             // Financials
             'currency' => $this->currency_code,
             'subtotal' => $this->subtotal,
-            'subtotal_formatted' => $this->formatted_subtotal,
+            'subtotal_formatted' => $this->getFormattedSubtotalAttribute(),
             'tax_amount' => $this->tax_amount,
             'tax_rate' => $this->tax_rate,
             'shipping_amount' => $this->shipping_amount,
             'discount_amount' => $this->discount_amount,
             'grand_total' => $this->grand_total,
-            'grand_total_formatted' => $this->formatted_grand_total,
+            'grand_total_formatted' => $this->getFormattedGrandTotalAttribute(),
 
             // Commission & Payout
             'commission_amount' => $this->commission_amount,
@@ -86,6 +92,7 @@ class OrderResource extends JsonResource
                     'events' => $this->tracking->tracking_events,
                 ];
             }),
+
             'carrier' => $this->whenLoaded('carrier', function () {
                 return [
                     'id' => $this->carrier->id,
@@ -93,6 +100,7 @@ class OrderResource extends JsonResource
                     'code' => $this->carrier->code,
                 ];
             }),
+
             'tracking_number' => $this->tracking_number,
 
             // Coupon
@@ -103,6 +111,7 @@ class OrderResource extends JsonResource
                     'discount_value' => $this->coupon->discount_value,
                 ];
             }),
+
             'coupon_code' => $this->coupon_code,
 
             // Addresses
@@ -121,7 +130,10 @@ class OrderResource extends JsonResource
             'timeline' => $this->when($request->include_timeline ?? false, function () {
                 return $this->getTimeline();
             }),
-            'status_history' => OrderStatusHistoryResource::collection($this->whenLoaded('statusHistory')),
+
+            'status_history' => OrderStatusHistoryResource::collection(
+                $this->whenLoaded('statusHistory')
+            ),
 
             // Payment Transactions
             'payment_transactions' => $this->whenLoaded('paymentTransactions', function () {
@@ -146,6 +158,7 @@ class OrderResource extends JsonResource
                     'paid_at' => $this->settlement->paid_at?->toIso8601String(),
                 ];
             }),
+
             'is_settled' => $this->is_settled,
             'settled_at' => $this->settled_at?->toIso8601String(),
 
@@ -160,8 +173,8 @@ class OrderResource extends JsonResource
             'is_refunded' => $this->is_refunded,
             'is_shipped' => $this->is_shipped,
             'is_delivered' => $this->is_delivered,
-            
-            // ✅ Fixed: Now calls methods on underlying model
+
+            // Methods from model
             'can_be_cancelled' => $this->forwardToModel('canBeCancelled'),
             'can_be_refunded' => $this->forwardToModel('canBeRefunded'),
 
@@ -174,29 +187,19 @@ class OrderResource extends JsonResource
     }
 
     /**
-     * Forward method calls to the underlying model with error handling
-     * 
-     * @param string $method
-     * @param array $parameters
-     * @return mixed
+     * Forward method calls to the underlying model
      */
     public function __call($method, $parameters)
     {
-        // Check if method exists on the underlying resource (Order model)
         if (method_exists($this->resource, $method)) {
             return $this->forwardCallTo($this->resource, $method, $parameters);
         }
-        
-        // Fall back to parent implementation
+
         return parent::__call($method, $parameters);
     }
 
     /**
-     * Safely forward a method call to the underlying model with null handling
-     * 
-     * @param string $method
-     * @param mixed $default
-     * @return mixed
+     * Safe forward method
      */
     protected function forwardToModel(string $method, $default = false)
     {
@@ -204,21 +207,20 @@ class OrderResource extends JsonResource
             if ($this->resource && method_exists($this->resource, $method)) {
                 return $this->resource->$method();
             }
-            
+
             return $default;
         } catch (\Exception $e) {
-            // Log error if needed, but don't break the response
             logger()->warning("Failed to call {$method} on order model", [
                 'order_id' => $this->id ?? null,
                 'error' => $e->getMessage(),
             ]);
-            
+
             return $default;
         }
     }
 
     /**
-     * Get status label
+     * Status label
      */
     private function getStatusLabelAttribute(): string
     {
@@ -236,7 +238,7 @@ class OrderResource extends JsonResource
     }
 
     /**
-     * Get status color
+     * Status color
      */
     private function getStatusColorAttribute(): string
     {
@@ -254,29 +256,28 @@ class OrderResource extends JsonResource
     }
 
     /**
-     * Get formatted subtotal
+     * Formatted subtotal
      */
     private function getFormattedSubtotalAttribute(): string
     {
-        return $this->currency_code.' '.number_format($this->subtotal, 2);
+        return $this->currency_code . ' ' . number_format($this->subtotal, 2);
     }
 
     /**
-     * Get formatted grand total
+     * Formatted grand total
      */
     private function getFormattedGrandTotalAttribute(): string
     {
-        return $this->currency_code.' '.number_format($this->grand_total, 2);
+        return $this->currency_code . ' ' . number_format($this->grand_total, 2);
     }
 
     /**
-     * Get order timeline
+     * Timeline
      */
     private function getTimeline(): array
     {
         $timeline = [];
 
-        // Order created
         $timeline[] = [
             'event' => 'Order Created',
             'status' => 'pending',
@@ -284,7 +285,6 @@ class OrderResource extends JsonResource
             'timestamp' => $this->created_at?->toIso8601String(),
         ];
 
-        // Payment received
         if ($this->payment_status === 'paid') {
             $timeline[] = [
                 'event' => 'Payment Received',
@@ -294,17 +294,16 @@ class OrderResource extends JsonResource
             ];
         }
 
-        // Order shipped
         if ($this->shipped_at) {
             $timeline[] = [
                 'event' => 'Order Shipped',
                 'status' => 'shipped',
-                'description' => 'Order has been shipped'.($this->tracking_number ? ' - Tracking: '.$this->tracking_number : ''),
+                'description' => 'Order has been shipped' .
+                    ($this->tracking_number ? ' - Tracking: ' . $this->tracking_number : ''),
                 'timestamp' => $this->shipped_at->toIso8601String(),
             ];
         }
 
-        // Order delivered
         if ($this->delivered_at) {
             $timeline[] = [
                 'event' => 'Order Delivered',

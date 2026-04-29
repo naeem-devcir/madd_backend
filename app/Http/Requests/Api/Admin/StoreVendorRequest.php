@@ -5,7 +5,7 @@ namespace App\Http\Requests\Api\Admin;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
-class StoreVendorStoreRequest extends FormRequest
+class StoreVendorRequest extends FormRequest
 {
     public function authorize(): bool
     {
