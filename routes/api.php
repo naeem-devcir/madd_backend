@@ -350,10 +350,12 @@ Route::prefix('v1')->group(function () {
         Route::get('statistics', [Api\Admin\AdminDashboardController::class, 'statistics']);
 
         // User Management
+        // user module compleate bhai like only jo reson ki bachodi hy us ka pata krna hy
         Route::prefix('users')->group(function () {
             Route::get('/', [Api\Admin\AdminUserController::class, 'index']);
             Route::get('{id}', [Api\Admin\AdminUserController::class, 'show']);
             Route::post('/', [Api\Admin\AdminUserController::class, 'store']);
+            Route::put('{id}', [Api\Admin\AdminUserController::class, 'update']);
             Route::put('{id}/role', [Api\Admin\AdminUserController::class, 'assignRole']);
             Route::put('{id}/suspend', [Api\Admin\AdminUserController::class, 'suspend']);
             Route::put('{id}/ban', [Api\Admin\AdminUserController::class, 'ban']);
@@ -380,6 +382,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/', [Api\admin\AdminStoreController::class, 'index']);
             Route::get('{uuid}', [Api\admin\AdminStoreController::class, 'show']);
             Route::put('{id}', [Api\admin\AdminStoreController::class, 'update']);
+            Route::post('/', [Api\admin\AdminStoreController::class, 'store']);
             Route::delete('{id}', [Api\admin\AdminStoreController::class, 'destroy']);
             Route::post('{id}/activate', [Api\admin\AdminStoreController::class, 'activate']);
             Route::post('{id}/deactivate', [Api\admin\AdminStoreController::class, 'deactivate']);

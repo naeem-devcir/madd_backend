@@ -50,6 +50,83 @@ class AdminStoreController extends Controller
         ]);
     }
 
+
+    /**
+     * Create a new store (admin)
+     */
+    public function store(Request $request)
+    {
+        $validated = $request->validate([
+            'vendor_id' => 'required|exists:vendors,id',
+            'name' => 'required|string|max:255',
+            'slug' => 'required|string|unique:vendor_stores,slug|max:255',
+            'description' => 'nullable|string',
+            'logo' => 'nullable|string|max:255',
+            'banner' => 'nullable|string|max:255',
+            'email' => 'nullable|email|max:255',
+            'phone' => 'nullable|string|max:20',
+            'address' => 'nullable|string',
+            'city' => 'nullable|string|max:100',
+            'state' => 'nullable|string|max:100',
+            'zip_code' => 'nullable|string|max:20',
+            'country_code' => 'nullable|string|size:2',
+            'currency' => 'nullable|string|size:3',
+            'timezone' => 'nullable|string|max:100',
+            'status' => 'nullable|in:active,inactive,pending',
+            'meta_title' => 'nullable|string|max:255',
+            'meta_description' => 'nullable|string',
+            'facebook_url' => 'nullable|url|max:255',
+            'instagram_url' => 'nullable|url|max:255',
+            'twitter_url' => 'nullable|url|max:255',
+            'whatsapp_number' => 'nullable|string|max:20',
+        ]);
+
+        DB::beginTransaction();
+
+        try {
+            // Generate UUID if not provided
+            $validated['uuid'] = (string) Str::uuid();
+
+            // Set default status if not provided
+            if (!isset($validated['status'])) {
+                $validated['status'] = 'pending';
+            }
+
+            // Create the store
+            $store = VendorStore::create($validated);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Store created successfully by admin',
+                'data' => new VendorStoreResource($store->load(['vendor', 'domain', 'theme'])),
+            ], 201);
+        } catch (\Illuminate\Database\QueryException $e) {
+            DB::rollBack();
+
+            if ($e->errorInfo[1] == 1062) { // Duplicate entry
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Store slug already exists. Please use a different slug.',
+                ], 422);
+            }
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to create store: ' . $e->getMessage(),
+            ], 500);
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to create store: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+
     /**
      * Update store (admin override)
      */

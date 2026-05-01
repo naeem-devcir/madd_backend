@@ -262,6 +262,22 @@ class User extends Authenticatable implements MustVerifyEmailContract
 
     // ========== Methods ==========
 
+    public function sendPasswordResetNotification($token)
+    {
+        $url = env('FRONTEND_URL', 'http://localhost:5173') . '/forgot-password?token=' . $token . '&email=' . urlencode($this->email);
+
+        $this->notify(new class($token, $url) extends \Illuminate\Auth\Notifications\ResetPassword {
+            public $url;
+            public function __construct($token, $url) {
+                parent::__construct($token);
+                $this->url = $url;
+            }
+            protected function resetUrl($notifiable) {
+                return $this->url;
+            }
+        });
+    }
+
     public function incrementLoginAttempts(): void
     {
         $this->increment('login_attempts');
