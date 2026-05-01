@@ -12,6 +12,7 @@ return new class extends Migration
             $table->string('code', 10)->primary();
             $table->string('name', 100);
             $table->string('locale', 20);
+            $table->boolean('is_default')->default(false);
             $table->boolean('is_rtl')->default(false);
             $table->boolean('is_active')->default(true);
             $table->timestamps();

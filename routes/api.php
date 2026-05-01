@@ -353,6 +353,7 @@ Route::prefix('v1')->group(function () {
         // user module compleate bhai like only jo reson ki bachodi hy us ka pata krna hy
         Route::prefix('users')->group(function () {
             Route::get('/', [Api\Admin\AdminUserController::class, 'index']);
+            Route::post('/', [Api\Admin\AdminVendorController::class, 'store']);
             Route::get('{id}', [Api\Admin\AdminUserController::class, 'show']);
             Route::post('/', [Api\Admin\AdminUserController::class, 'store']);
             Route::put('{id}', [Api\Admin\AdminUserController::class, 'update']);
@@ -361,12 +362,13 @@ Route::prefix('v1')->group(function () {
             Route::put('{id}/ban', [Api\Admin\AdminUserController::class, 'ban']);
             Route::put('{id}/activate', [Api\Admin\AdminUserController::class, 'activate']);
             Route::delete('{id}', [Api\Admin\AdminUserController::class, 'destroy']);
-            // Route::post('{id}/impersonate', [Api\Admin\AdminUserController::class, 'impersonate']);
+            Route::post('{id}/impersonate', [Api\Admin\AdminUserController::class, 'impersonate']);
         });
 
         // Vendor Management
         Route::prefix('vendors')->group(function () {
             Route::get('/', [Api\Admin\AdminVendorController::class, 'index']);
+            Route::post('/', [Api\Admin\AdminVendorController::class, 'store']);
             Route::get('statistics', [Api\Admin\AdminVendorController::class, 'statistics']);
             Route::get('applications', [Api\Admin\AdminVendorController::class, 'applications']);
             Route::get('{id}', [Api\Admin\AdminVendorController::class, 'show']);
@@ -374,20 +376,24 @@ Route::prefix('v1')->group(function () {
             Route::post('{id}/suspend', [Api\Admin\AdminVendorController::class, 'suspend']);
             Route::post('{id}/activate', [Api\Admin\AdminVendorController::class, 'activate']);
             Route::put('{id}/plan', [Api\Admin\AdminVendorController::class, 'updatePlan']);
-            // Route::post('{id}/kyc-verify', [Api\Admin\AdminVendorController::class, 'verifyKyc']);
-            // Route::post('{id}/kyc-reject', [Api\Admin\AdminVendorController::class, 'rejectKyc']);
+            Route::post('{id}/kyc-verify', [Api\Admin\AdminVendorController::class, 'verifyKyc']);
+            Route::post('{id}/kyc-reject', [Api\Admin\AdminVendorController::class, 'rejectKyc']);
         });
         // Store Management
         Route::prefix('stores')->group(function () {
-            Route::get('/', [Api\admin\AdminStoreController::class, 'index']);
-            Route::get('{uuid}', [Api\admin\AdminStoreController::class, 'show']);
-            Route::put('{id}', [Api\admin\AdminStoreController::class, 'update']);
-            Route::post('/', [Api\admin\AdminStoreController::class, 'store']);
-            Route::delete('{id}', [Api\admin\AdminStoreController::class, 'destroy']);
-            Route::post('{id}/activate', [Api\admin\AdminStoreController::class, 'activate']);
-            Route::post('{id}/deactivate', [Api\admin\AdminStoreController::class, 'deactivate']);
-            Route::post('{id}/domain', [Api\admin\AdminStoreController::class, 'addDomain']);
-            Route::get('{id}/stats', [Api\admin\AdminStoreController::class, 'stats']);
+            Route::get('/', [Api\Admin\AdminStoreController::class, 'index']);
+            Route::post('/', [Api\Admin\AdminStoreController::class, 'store']); // ADDED: Create store
+            Route::get('by-vendor/{vendorId}', [Api\Admin\AdminStoreController::class, 'getStoresByVendor']); // ADDED: Get stores by vendor
+            Route::post('bulk-status', [Api\Admin\AdminStoreController::class, 'bulkStatusUpdate']); // ADDED: Bulk status update
+            Route::get('{uuid}', [Api\Admin\AdminStoreController::class, 'show']);
+            Route::put('{id}', [Api\Admin\AdminStoreController::class, 'update']);
+            Route::delete('{id}', [Api\Admin\AdminStoreController::class, 'destroy']);
+            Route::delete('{id}/force', [Api\Admin\AdminStoreController::class, 'forceDelete']); // ADDED: Force delete
+            Route::post('{id}/restore', [Api\Admin\AdminStoreController::class, 'restore']); // ADDED: Restore soft-deleted
+            Route::post('{id}/activate', [Api\Admin\AdminStoreController::class, 'activate']);
+            Route::post('{id}/deactivate', [Api\Admin\AdminStoreController::class, 'deactivate']);
+            Route::post('{id}/domain', [Api\Admin\AdminStoreController::class, 'addDomain']);
+            Route::get('{id}/stats', [Api\Admin\AdminStoreController::class, 'stats']);
         });
 
         // Product Management
@@ -412,6 +418,9 @@ Route::prefix('v1')->group(function () {
             Route::put('{id}/status', [Api\Admin\AdminOrderController::class, 'updateStatus']);
             Route::post('{id}/refund', [Api\Admin\AdminOrderController::class, 'processRefund']);
             Route::post('{id}/cancel', [Api\Admin\AdminOrderController::class, 'cancel']);
+
+            Route::get('orders/by-store/{storeId}', [Api\Admin\AdminOrderController::class, 'getOrdersByStore']);
+            Route::get('orders/by-vendor/{vendorId}', [Api\Admin\AdminOrderController::class, 'getOrdersByVendor']);
         });
 
         // Settlement Management
@@ -427,9 +436,22 @@ Route::prefix('v1')->group(function () {
         });
 
         // Coupon Management
-        Route::apiResource('coupons', Api\Admin\AdminCouponController::class);
-        Route::post('coupons/{id}/duplicate', [Api\Admin\AdminCouponController::class, 'duplicate']);
-        Route::post('coupons/{id}/sync', [Api\Admin\AdminCouponController::class, 'syncToMagento']);
+        // Route::apiResource('coupons', Api\Admin\AdminCouponController::class);
+        // Route::post('coupons/{id}/duplicate', [Api\Admin\AdminCouponController::class, 'duplicate']);
+        // Route::post('coupons/{id}/sync', [Api\Admin\AdminCouponController::class, 'syncToMagento']);
+        // Add this to your routes file
+        Route::prefix('coupons')->group(function () {
+            Route::get('/', [Api\Admin\AdminCouponController::class, 'index']);
+            Route::get('statistics', [Api\Admin\AdminCouponController::class, 'statistics']);
+            Route::get('export', [Api\Admin\AdminCouponController::class, 'export']);
+            Route::post('/', [Api\Admin\AdminCouponController::class, 'store']);
+            Route::get('{id}', [Api\Admin\AdminCouponController::class, 'show']);
+            Route::put('{id}', [Api\Admin\AdminCouponController::class, 'update']);
+            Route::delete('{id}', [Api\Admin\AdminCouponController::class, 'destroy']);
+            Route::post('{id}/duplicate', [Api\Admin\AdminCouponController::class, 'duplicate']);
+            Route::post('{id}/toggle-status', [Api\Admin\AdminCouponController::class, 'toggleStatus']); // Add this
+            Route::post('{id}/sync', [Api\Admin\AdminCouponController::class, 'syncToMagento']);
+        });
 
         // Platform Settings
         Route::prefix('settings')->group(function () {
@@ -478,14 +500,41 @@ Route::prefix('v1')->group(function () {
         Route::post('plans/sort-order', [Api\Admin\AdminPlanController::class, 'updateSortOrder']);
 
         // MLM Management
+        // Route::prefix('mlm')->group(function () {
+        //     Route::get('agents', [Api\Admin\AdminMLMController::class, 'index']);
+        //     Route::get('agents/{id}', [Api\Admin\AdminMLMController::class, 'show']);
+        //     Route::post('agents/{id}/verify', [Api\Admin\AdminMLMController::class, 'verify']);
+        //     Route::get('commissions', [Api\Admin\AdminMLMController::class, 'commissions']);
+        //     Route::post('commissions/process', [Api\Admin\AdminMLMController::class, 'processCommissions']);
+        //     Route::post('commissions/{id}/pay', [Api\Admin\AdminMLMController::class, 'payCommission']);
+        //     Route::get('structure', [Api\Admin\AdminMLMController::class, 'structure']);
+        //     Route::get('levels', [Api\Admin\AdminMLMController::class, 'levels']);
+        //     Route::put('levels', [Api\Admin\AdminMLMController::class, 'updateLevels']);
+        // });
         Route::prefix('mlm')->group(function () {
-            Route::get('agents', [Api\Admin\AdminMLMController::class, 'index']);
-            Route::get('agents/{id}', [Api\Admin\AdminMLMController::class, 'show']);
+
+            // ── Agents ────────────────────────────────────────────────────────────────
+            Route::get('agents',              [Api\Admin\AdminMLMController::class, 'index']);
+            Route::post('agents',             [Api\Admin\AdminMLMController::class, 'store']);
+            Route::get('agents/{id}',         [Api\Admin\AdminMLMController::class, 'show']);
+            Route::put('agents/{id}',         [Api\Admin\AdminMLMController::class, 'update']);
+            Route::delete('agents/{id}',      [Api\Admin\AdminMLMController::class, 'destroy']);
             Route::post('agents/{id}/verify', [Api\Admin\AdminMLMController::class, 'verify']);
-            Route::get('commissions', [Api\Admin\AdminMLMController::class, 'commissions']);
-            Route::post('commissions/process', [Api\Admin\AdminMLMController::class, 'processCommissions']);
-            Route::post('commissions/{id}/pay', [Api\Admin\AdminMLMController::class, 'payCommission']);
+
+            // ── Commissions ───────────────────────────────────────────────────────────
+            Route::get('commissions',                   [Api\Admin\AdminMLMController::class, 'commissions']);
+            Route::post('commissions/process',          [Api\Admin\AdminMLMController::class, 'processCommissions']);
+            Route::post('commissions/{id}/approve',     [Api\Admin\AdminMLMController::class, 'approveCommission']);
+            Route::post('commissions/{id}/reject',      [Api\Admin\AdminMLMController::class, 'rejectCommission']);
+            Route::post('commissions/{id}/pay',         [Api\Admin\AdminMLMController::class, 'payCommission']);
+
+            // ── Statistics ────────────────────────────────────────────────────────────
+            Route::get('statistics', [Api\Admin\AdminMLMController::class, 'statistics']);
+
+            // ── Structure ─────────────────────────────────────────────────────────────
             Route::get('structure', [Api\Admin\AdminMLMController::class, 'structure']);
+
+            // ── Levels ────────────────────────────────────────────────────────────────
             Route::get('levels', [Api\Admin\AdminMLMController::class, 'levels']);
             Route::put('levels', [Api\Admin\AdminMLMController::class, 'updateLevels']);
         });

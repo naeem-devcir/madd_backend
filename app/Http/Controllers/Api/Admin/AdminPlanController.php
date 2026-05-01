@@ -19,12 +19,12 @@ class AdminPlanController extends Controller
             ->orderBy('sort_order')
             ->orderBy('price_monthly')
             ->get();
-        
+
         // Transform data to match frontend expected structure
-        $transformedPlans = $plans->map(function($plan) {
+        $transformedPlans = $plans->map(function ($plan) {
             return $this->transformForFrontend($plan);
         });
-        
+
         return response()->json($transformedPlans);
     }
 
@@ -97,7 +97,7 @@ class AdminPlanController extends Controller
     public function show(string $id): JsonResponse
     {
         $plan = VendorPlan::withCount('vendors')->findOrFail($id);
-        
+
         return response()->json($this->transformForFrontend($plan));
     }
 
@@ -107,7 +107,7 @@ class AdminPlanController extends Controller
     public function update(Request $request, string $id): JsonResponse
     {
         $plan = VendorPlan::findOrFail($id);
-        
+
         $validated = $request->validate([
             'subscription_name' => 'sometimes|string|max:100',
             'billing_type' => 'sometimes|string|in:monthly,yearly,one-time',
@@ -129,43 +129,43 @@ class AdminPlanController extends Controller
             $plan->name = $validated['subscription_name'];
             $plan->slug = Str::slug($validated['subscription_name']);
         }
-        
+
         if (isset($validated['description'])) {
             $plan->description = $validated['description'];
         }
-        
+
         if (isset($validated['status'])) {
             $plan->is_active = $validated['status'];
         }
-        
+
         if (isset($validated['feature'])) {
             $plan->features = $validated['feature'];
         }
-        
+
         if (isset($validated['trial_period_days'])) {
             $plan->trial_period_days = $validated['trial_period_days'];
         }
-        
+
         if (isset($validated['max_products'])) {
             $plan->max_products = $validated['max_products'];
         }
-        
+
         if (isset($validated['max_stores'])) {
             $plan->max_stores = $validated['max_stores'];
         }
-        
+
         if (isset($validated['max_users'])) {
             $plan->max_users = $validated['max_users'];
         }
-        
+
         if (isset($validated['setup_fee'])) {
             $plan->setup_fee = $validated['setup_fee'];
         }
-        
+
         if (isset($validated['transaction_fee_percentage'])) {
             $plan->transaction_fee_percentage = $validated['transaction_fee_percentage'];
         }
-        
+
         if (isset($validated['commission_rate'])) {
             $plan->commission_rate = $validated['commission_rate'];
         }
@@ -199,7 +199,7 @@ class AdminPlanController extends Controller
     public function destroy(string $id): JsonResponse
     {
         $plan = VendorPlan::findOrFail($id);
-        
+
         // Check if plan has vendors
         if ($plan->vendors()->count() > 0) {
             return response()->json([
@@ -207,7 +207,7 @@ class AdminPlanController extends Controller
                 'message' => 'Cannot delete plan with active vendors'
             ], 400);
         }
-        
+
         // Prevent deletion of default plan
         if ($plan->is_default) {
             return response()->json([
@@ -215,7 +215,7 @@ class AdminPlanController extends Controller
                 'message' => 'Cannot delete the default plan'
             ], 400);
         }
-        
+
         $plan->delete();
 
         return response()->json(null, 204);
@@ -227,20 +227,20 @@ class AdminPlanController extends Controller
     public function setDefault(string $id): JsonResponse
     {
         $plan = VendorPlan::findOrFail($id);
-        
+
         if (!$plan->is_active) {
             return response()->json([
                 'success' => false,
                 'message' => 'Cannot set inactive plan as default'
             ], 400);
         }
-        
+
         // Remove default from all plans
         VendorPlan::where('is_default', true)->update(['is_default' => false]);
-        
+
         // Set new default plan
         $plan->update(['is_default' => true]);
-        
+
         return response()->json([
             'success' => true,
             'message' => 'Default plan set successfully'
@@ -255,7 +255,7 @@ class AdminPlanController extends Controller
         // Determine billing type and price based on pricing structure
         $billingType = 'monthly'; // default
         $price = $plan->price_monthly;
-        
+
         if ($plan->price_yearly && $plan->price_yearly == $plan->price_monthly * 12) {
             $billingType = 'monthly';
             $price = $plan->price_monthly;
@@ -290,5 +290,71 @@ class AdminPlanController extends Controller
             'is_default' => $plan->is_default,
             'sort_order' => $plan->sort_order,
         ];
+    }
+
+
+    /**
+     * Toggle plan active status
+     */
+    public function toggleActive(string $id): JsonResponse
+    {
+        $plan = VendorPlan::findOrFail($id);
+
+        // Prevent deactivating default plan
+        if ($plan->is_default && $plan->is_active) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot deactivate the default plan'
+            ], 400);
+        }
+
+        $plan->is_active = !$plan->is_active;
+        $plan->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => $plan->is_active ? 'Plan activated' : 'Plan deactivated',
+            'data' => ['is_active' => $plan->is_active]
+        ]);
+    }
+
+    /**
+     * Update sort order for plans
+     */
+    public function updateSortOrder(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'orders' => 'required|array',
+            'orders.*.id' => 'required|exists:vendor_plans,id',
+            'orders.*.sort_order' => 'required|integer|min:0',
+        ]);
+
+        foreach ($validated['orders'] as $order) {
+            VendorPlan::where('id', $order['id'])->update(['sort_order' => $order['sort_order']]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Sort order updated successfully'
+        ]);
+    }
+
+    /**
+     * Get plan statistics
+     */
+    public function stats(): JsonResponse
+    {
+        $stats = [
+            'total_plans' => VendorPlan::count(),
+            'active_plans' => VendorPlan::where('is_active', true)->count(),
+            'inactive_plans' => VendorPlan::where('is_active', false)->count(),
+            'default_plan' => VendorPlan::where('is_default', true)->first(),
+            'vendor_subscriptions' => VendorPlan::withCount('vendors')->get()->sum('vendors_count'),
+            'most_popular_plan' => VendorPlan::withCount('vendors')
+                ->orderBy('vendors_count', 'desc')
+                ->first(),
+        ];
+
+        return response()->json($stats);
     }
 }

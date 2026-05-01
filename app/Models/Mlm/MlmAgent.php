@@ -36,7 +36,11 @@ class MlmAgent extends Model
     ];
 
     // ========== Relationships ==========
-
+    
+    public function levelDetails()
+    {
+        return $this->belongsTo(MlmLevel::class, 'level', 'level');
+    }
     public function user()
     {
         return $this->belongsTo(User::class, 'user_id', 'id');

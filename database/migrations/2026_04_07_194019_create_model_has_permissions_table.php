@@ -4,37 +4,26 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-return new class extends Migration
-{
+return new class extends Migration {
     public function up(): void
     {
         Schema::create('model_has_permissions', function (Blueprint $table) {
-            // Permission ID
-            $table->foreignId('permission_id')
-                ->constrained('permissions')
-                ->cascadeOnDelete();
+            $table->unsignedBigInteger('permission_id');
 
-            // Polymorphic relationship
             $table->string('model_type');
-            $table->unsignedBigInteger('model_id'); // Integer, not char
+            $table->unsignedBigInteger('model_id');
 
-            // Who granted this permission - references users.id (bigint)
-            $table->foreignId('granted_by')
-                ->nullable()
-                ->constrained('users')
-                ->nullOnDelete();
+            $table->index(['model_id', 'model_type']);
 
-            // Timestamp
-            $table->timestamp('granted_at')->useCurrent();
+            $table->foreign('permission_id')
+                ->references('id')
+                ->on('permissions')
+                ->onDelete('cascade');
 
-            // Primary key
-            $table->primary(['permission_id', 'model_id', 'model_type'], 'model_has_permissions_primary');
-
-            // Indexes for performance
-            $table->index('model_id');
-            $table->index('model_type');
-            $table->index(['model_type', 'model_id']);
-            $table->index('granted_by');
+            $table->primary(
+                ['permission_id', 'model_id', 'model_type'],
+                'model_has_permissions_permission_model_type_primary'
+            );
         });
     }
 

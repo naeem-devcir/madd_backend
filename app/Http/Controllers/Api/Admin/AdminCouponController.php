@@ -8,6 +8,8 @@ use App\Services\Promotion\CouponService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+
 
 class AdminCouponController extends Controller
 {
@@ -44,8 +46,8 @@ class AdminCouponController extends Controller
 
         if ($request->has('search')) {
             $query->where(function ($q) use ($request) {
-                $q->where('code', 'like', '%'.$request->search.'%')
-                    ->orWhere('description', 'like', '%'.$request->search.'%');
+                $q->where('code', 'like', '%' . $request->search . '%')
+                    ->orWhere('description', 'like', '%' . $request->search . '%');
             });
         }
 
@@ -113,7 +115,6 @@ class AdminCouponController extends Controller
                 'message' => 'Coupon created successfully',
                 'data' => $coupon->load('vendor'),
             ], 201);
-
         } catch (\Exception $e) {
             DB::rollBack();
 
@@ -159,7 +160,7 @@ class AdminCouponController extends Controller
         $coupon = Coupon::findOrFail($id);
 
         $validated = $request->validate([
-            'code' => 'sometimes|string|max:50|unique:coupons,code,'.$coupon->id,
+            'code' => 'sometimes|string|max:50|unique:coupons,code,' . $coupon->id,
             'description' => 'nullable|string',
             'discount_type' => ['sometimes', Rule::in(['percentage', 'fixed_amount', 'free_shipping', 'buy_x_get_y'])],
             'discount_value' => 'required_if:discount_type,percentage,fixed_amount|numeric|min:0',
@@ -196,7 +197,6 @@ class AdminCouponController extends Controller
                 'message' => 'Coupon updated successfully',
                 'data' => $coupon->fresh(),
             ]);
-
         } catch (\Exception $e) {
             DB::rollBack();
 
@@ -239,7 +239,6 @@ class AdminCouponController extends Controller
                 'success' => true,
                 'message' => 'Coupon deleted successfully',
             ]);
-
         } catch (\Exception $e) {
             DB::rollBack();
 
@@ -256,23 +255,36 @@ class AdminCouponController extends Controller
      */
     public function toggleStatus($id)
     {
-        $coupon = Coupon::findOrFail($id);
+        try {
+            $coupon = Coupon::findOrFail($id);
 
-        $coupon->is_active = ! $coupon->is_active;
-        $coupon->save();
+            $coupon->is_active = !$coupon->is_active;
+            $coupon->save();
 
-        // Sync status to Magento
-        if ($coupon->type === 'platform' && $coupon->magento_rule_id) {
-            $this->couponService->syncStatusToMagento($coupon);
+            // Sync status to Magento if platform coupon
+            if ($coupon->type === 'platform' && $coupon->magento_rule_id) {
+                $this->couponService->syncStatusToMagento($coupon);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => $coupon->is_active ? 'Coupon activated' : 'Coupon deactivated',
+                'data' => [
+                    'is_active' => $coupon->is_active,
+                ],
+            ]);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Coupon not found',
+            ], 404);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to toggle coupon status',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error',
+            ], 500);
         }
-
-        return response()->json([
-            'success' => true,
-            'message' => $coupon->is_active ? 'Coupon activated' : 'Coupon deactivated',
-            'data' => [
-                'is_active' => $coupon->is_active,
-            ],
-        ]);
     }
 
     /**
@@ -283,7 +295,7 @@ class AdminCouponController extends Controller
         $originalCoupon = Coupon::findOrFail($id);
 
         $newCoupon = $originalCoupon->replicate();
-        $newCoupon->code = $originalCoupon->code.'_copy_'.time();
+        $newCoupon->code = $originalCoupon->code . '_copy_' . time();
         $newCoupon->used_count = 0;
         $newCoupon->spent_amount = 0;
         $newCoupon->magento_rule_id = null;
@@ -343,14 +355,25 @@ class AdminCouponController extends Controller
 
         $coupons = $query->get();
 
-        $filename = 'coupons_export_'.date('Y-m-d_His').'.csv';
+        $filename = 'coupons_export_' . date('Y-m-d_His') . '.csv';
         $handle = fopen('php://temp', 'w');
 
         // Headers
         fputcsv($handle, [
-            'ID', 'Code', 'Type', 'Discount Type', 'Discount Value',
-            'Min Order', 'Max Uses', 'Used Count', 'Total Discount',
-            'Valid From', 'Valid To', 'Status', 'Vendor', 'Created At',
+            'ID',
+            'Code',
+            'Type',
+            'Discount Type',
+            'Discount Value',
+            'Min Order',
+            'Max Uses',
+            'Used Count',
+            'Total Discount',
+            'Valid From',
+            'Valid To',
+            'Status',
+            'Vendor',
+            'Created At',
         ]);
 
         // Data
@@ -399,4 +422,3 @@ class AdminCouponController extends Controller
         ], 501);
     }
 }
-

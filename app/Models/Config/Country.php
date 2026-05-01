@@ -1,7 +1,8 @@
 <?php
 
-namespace App\Models;
+namespace App\Models\Config;
 
+use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 
@@ -51,5 +52,11 @@ class Country extends Model
     public function scopeActive($query)
     {
         return $query->where('is_active', true);
+    }
+
+    // Relationship with country_configs
+    public function config()
+    {
+        return $this->hasOne(CountryConfig::class, 'code', 'iso2');
     }
 }

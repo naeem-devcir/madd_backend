@@ -168,4 +168,98 @@ class Order extends Model
     {
         return $this->belongsTo(Courier::class, 'carrier_id');
     }
+
+
+    public function canBeCancelled(): bool
+    {
+        return in_array($this->status, ['pending', 'processing']) && $this->payment_status !== 'paid';
+    }
+
+    public function canBeRefunded(): bool
+    {
+        return $this->payment_status === 'paid' && !in_array($this->status, ['cancelled', 'refunded']);
+    }
+
+
+
+
+
+
+    /**
+     * Check if this is a guest order
+     */
+    public function getIsGuestOrderAttribute(): bool
+    {
+        return is_null($this->customer_id);
+    }
+    /**
+     * Check if order is paid
+     */
+    public function getIsPaidAttribute(): bool
+    {
+        return $this->payment_status === 'paid';
+    }
+
+
+    /**
+     * Check if order is refunded
+     */
+    public function getIsRefundedAttribute(): bool
+    {
+        return $this->payment_status === 'refunded';
+    }
+    /**
+     * Check if order is shipped
+     */
+    public function getIsShippedAttribute(): bool
+    {
+        return !is_null($this->shipped_at);
+    }
+
+
+    /**
+     * Check if order is delivered
+     */
+    public function getIsDeliveredAttribute(): bool
+    {
+        return !is_null($this->delivered_at);
+    }
+
+
+
+    /**
+     * Get formatted shipping address
+     */
+    public function getShippingAddressFormattedAttribute(): ?string
+    {
+        if (!$this->shipping_address) {
+            return null;
+        }
+
+        $address = $this->shipping_address;
+        $parts = [];
+
+        if (isset($address['firstname']) || isset($address['lastname'])) {
+            $parts[] = trim(($address['firstname'] ?? '') . ' ' . ($address['lastname'] ?? ''));
+        }
+
+        if (isset($address['street'])) {
+            $parts[] = $address['street'];
+        }
+
+        $cityParts = [];
+        if (isset($address['city'])) $cityParts[] = $address['city'];
+        if (isset($address['state'])) $cityParts[] = $address['state'];
+        if (isset($address['zipcode'])) $cityParts[] = $address['zipcode'];
+
+        if (!empty($cityParts)) {
+            $parts[] = implode(', ', $cityParts);
+        }
+
+        if (isset($address['country'])) {
+            $parts[] = $address['country'];
+        }
+
+        return implode("\n", $parts);
+    }
 }

@@ -13,6 +13,7 @@ return new class extends Migration
             $table->string('name', 100);
             $table->string('symbol', 10);
             $table->decimal('exchange_rate', 10, 4)->default(1.00);
+            $table->boolean('is_default')->default(false);
             $table->tinyInteger('decimal_places')->default(2);
             $table->boolean('is_active')->default(true);
             $table->timestamps();

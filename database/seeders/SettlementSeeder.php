@@ -16,9 +16,9 @@ class SettlementSeeder extends Seeder
                 'uuid' => (string) Str::uuid(),
                 'payable_type' => 'App\\Models\\Vendor\\Vendor',
                 'payable_id' => 2,
-                'vendor_id' => 2,
+                'vendor_id' => 1,
                 'madd_company_id' => null,
-                'approved_by' => null,
+                'approved_by' => 2,
 
                 'period_start' => Carbon::now()->subDays(30),
                 'period_end' => Carbon::now(),

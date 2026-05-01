@@ -19,7 +19,7 @@ class AdminSettingsController extends Controller
      */
     public function index(Request $request)
     {
-        $group = $request->get('group');
+        $group = $request->input('group');
 
         $settings = [
             'general' => $this->getGeneralSettings(),
@@ -45,6 +45,107 @@ class AdminSettingsController extends Controller
     }
 
     /**
+     * Generic update method for settings (used by PUT /settings)
+     */
+    public function update(Request $request)
+    {
+        $validated = $request->validate([
+            'group' => 'required|in:general,payment,shipping,tax,email,api,security',
+            'settings' => 'required|array',
+        ]);
+
+        $group = $validated['group'];
+        $settings = $validated['settings'];
+
+        DB::beginTransaction();
+
+        try {
+            foreach ($settings as $key => $value) {
+                setting([$key => $value]);
+            }
+
+            DB::commit();
+
+            // Clear cache for this group
+            Cache::forget('system_settings');
+            Cache::forget("{$group}_settings");
+
+            return response()->json([
+                'success' => true,
+                'message' => ucfirst($group) . ' settings updated successfully',
+                'data' => $settings,
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update settings',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Get system settings (for /settings/system route)
+     */
+    public function system()
+    {
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'general' => $this->getGeneralSettings(),
+                'api' => $this->getApiSettings(),
+                'security' => $this->getSecuritySettings(),
+            ],
+        ]);
+    }
+
+    /**
+     * Get payment settings (for /settings/payment route)
+     */
+    public function payment()
+    {
+        return response()->json([
+            'success' => true,
+            'data' => $this->getPaymentSettings(),
+        ]);
+    }
+
+    /**
+     * Get shipping settings (for /settings/shipping route)
+     */
+    public function shipping()
+    {
+        return response()->json([
+            'success' => true,
+            'data' => $this->getShippingSettings(),
+        ]);
+    }
+
+    /**
+     * Get tax settings (for /settings/tax route)
+     */
+    public function tax()
+    {
+        return response()->json([
+            'success' => true,
+            'data' => $this->getTaxSettings(),
+        ]);
+    }
+
+    /**
+     * Get email settings (for /settings/email route)
+     */
+    public function email()
+    {
+        return response()->json([
+            'success' => true,
+            'data' => $this->getEmailSettings(),
+        ]);
+    }
+
+    /**
      * Update general settings
      */
     public function updateGeneral(Request $request)
@@ -63,17 +164,30 @@ class AdminSettingsController extends Controller
             'time_format' => 'required|string',
         ]);
 
-        foreach ($validated as $key => $value) {
-            setting([$key => $value]);
+        DB::beginTransaction();
+
+        try {
+            foreach ($validated as $key => $value) {
+                setting([$key => $value]);
+            }
+
+            DB::commit();
+            Cache::forget('system_settings');
+
+            return response()->json([
+                'success' => true,
+                'message' => 'General settings updated successfully',
+                'data' => $validated,
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update general settings',
+                'error' => $e->getMessage(),
+            ], 500);
         }
-
-        Cache::forget('system_settings');
-
-        return response()->json([
-            'success' => true,
-            'message' => 'General settings updated successfully',
-            'data' => $validated,
-        ]);
     }
 
     /**
@@ -96,17 +210,30 @@ class AdminSettingsController extends Controller
             'default_payment_method' => 'string',
         ]);
 
-        foreach ($validated as $key => $value) {
-            setting([$key => $value]);
+        DB::beginTransaction();
+
+        try {
+            foreach ($validated as $key => $value) {
+                setting([$key => $value]);
+            }
+
+            DB::commit();
+            Cache::forget('payment_settings');
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Payment settings updated successfully',
+                'data' => $validated,
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update payment settings',
+                'error' => $e->getMessage(),
+            ], 500);
         }
-
-        Cache::forget('payment_settings');
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Payment settings updated successfully',
-            'data' => $validated,
-        ]);
     }
 
     /**
@@ -121,17 +248,30 @@ class AdminSettingsController extends Controller
             'international_shipping_enabled' => 'boolean',
         ]);
 
-        foreach ($validated as $key => $value) {
-            setting([$key => $value]);
+        DB::beginTransaction();
+
+        try {
+            foreach ($validated as $key => $value) {
+                setting([$key => $value]);
+            }
+
+            DB::commit();
+            Cache::forget('shipping_settings');
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Shipping settings updated successfully',
+                'data' => $validated,
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update shipping settings',
+                'error' => $e->getMessage(),
+            ], 500);
         }
-
-        Cache::forget('shipping_settings');
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Shipping settings updated successfully',
-            'data' => $validated,
-        ]);
     }
 
     /**
@@ -147,17 +287,30 @@ class AdminSettingsController extends Controller
             'display_tax_totals' => 'boolean',
         ]);
 
-        foreach ($validated as $key => $value) {
-            setting([$key => $value]);
+        DB::beginTransaction();
+
+        try {
+            foreach ($validated as $key => $value) {
+                setting([$key => $value]);
+            }
+
+            DB::commit();
+            Cache::forget('tax_settings');
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Tax settings updated successfully',
+                'data' => $validated,
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update tax settings',
+                'error' => $e->getMessage(),
+            ], 500);
         }
-
-        Cache::forget('tax_settings');
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Tax settings updated successfully',
-            'data' => $validated,
-        ]);
     }
 
     /**
@@ -176,18 +329,30 @@ class AdminSettingsController extends Controller
             'mail_from_name' => 'required|string',
         ]);
 
-        // Update .env file (in production, use queue job)
-        foreach ($validated as $key => $value) {
-            setting([$key => $value]);
+        DB::beginTransaction();
+
+        try {
+            foreach ($validated as $key => $value) {
+                setting([$key => $value]);
+            }
+
+            DB::commit();
+            Cache::forget('email_settings');
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Email settings updated successfully',
+                'data' => $validated,
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update email settings',
+                'error' => $e->getMessage(),
+            ], 500);
         }
-
-        Cache::forget('email_settings');
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Email settings updated successfully',
-            'data' => $validated,
-        ]);
     }
 
     /**
@@ -203,17 +368,30 @@ class AdminSettingsController extends Controller
             'enable_api_logging' => 'boolean',
         ]);
 
-        foreach ($validated as $key => $value) {
-            setting([$key => $value]);
+        DB::beginTransaction();
+
+        try {
+            foreach ($validated as $key => $value) {
+                setting([$key => $value]);
+            }
+
+            DB::commit();
+            Cache::forget('api_settings');
+
+            return response()->json([
+                'success' => true,
+                'message' => 'API settings updated successfully',
+                'data' => $validated,
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update API settings',
+                'error' => $e->getMessage(),
+            ], 500);
         }
-
-        Cache::forget('api_settings');
-
-        return response()->json([
-            'success' => true,
-            'message' => 'API settings updated successfully',
-            'data' => $validated,
-        ]);
     }
 
     /**
@@ -231,17 +409,30 @@ class AdminSettingsController extends Controller
             'require_phone_verification' => 'boolean',
         ]);
 
-        foreach ($validated as $key => $value) {
-            setting([$key => $value]);
+        DB::beginTransaction();
+
+        try {
+            foreach ($validated as $key => $value) {
+                setting([$key => $value]);
+            }
+
+            DB::commit();
+            Cache::forget('security_settings');
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Security settings updated successfully',
+                'data' => $validated,
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update security settings',
+                'error' => $e->getMessage(),
+            ], 500);
         }
-
-        Cache::forget('security_settings');
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Security settings updated successfully',
-            'data' => $validated,
-        ]);
     }
 
     /**
@@ -328,7 +519,6 @@ class AdminSettingsController extends Controller
                 'success' => true,
                 'message' => 'Exchange rates updated successfully',
             ]);
-
         } catch (\Exception $e) {
             DB::rollBack();
 
@@ -455,7 +645,7 @@ class AdminSettingsController extends Controller
 
         $validated = $request->validate([
             'name' => 'sometimes|string|max:100',
-            'slug' => 'sometimes|string|max:100|unique:vendor_plans,slug,'.$plan->id,
+            'slug' => 'sometimes|string|max:100|unique:vendor_plans,slug,' . $plan->id,
             'description' => 'nullable|string',
             'price_monthly' => 'sometimes|numeric|min:0',
             'price_yearly' => 'sometimes|numeric|min:0',
@@ -657,53 +847,4 @@ class AdminSettingsController extends Controller
         // Implementation depends on backup system
         return null;
     }
-
-    public function update(Request $request)
-    {
-        return response()->json([
-            'success' => false,
-            'message' => 'Settings update is not implemented yet.',
-        ], 501);
-    }
-
-    public function system()
-    {
-        return response()->json([
-            'success' => true,
-            'data' => $this->getSystemInfo(),
-        ]);
-    }
-
-    public function payment()
-    {
-        return response()->json([
-            'success' => true,
-            'data' => $this->getPaymentSettings(),
-        ]);
-    }
-
-    public function shipping()
-    {
-        return response()->json([
-            'success' => true,
-            'data' => $this->getShippingSettings(),
-        ]);
-    }
-
-    public function tax()
-    {
-        return response()->json([
-            'success' => true,
-            'data' => $this->getTaxSettings(),
-        ]);
-    }
-
-    public function email()
-    {
-        return response()->json([
-            'success' => true,
-            'data' => $this->getEmailSettings(),
-        ]);
-    }
 }
-

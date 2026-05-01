@@ -1,4 +1,6 @@
-    <?php use Illuminate\Database\Migrations\Migration;
+<?php
+
+use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
@@ -31,14 +33,37 @@ return new class extends Migration
             $table->string('two_factor_secret')->nullable();
             $table->char('country_code', 2);
             $table->enum('kyc_status', ['pending', 'verified', 'rejected'])->default('pending');
+
+            // Columns FIRST
+            $table->json('metadata')->nullable();
+            $table->json('preferences')->nullable();
+            $table->boolean('is_super_admin')->default(false);
+            $table->boolean('is_email_verified')->default(false);
+            $table->boolean('is_phone_verified')->default(false);
+            $table->boolean('is_kyc_verified')->default(false);
+
+            // Self reference
+            $table->foreignId('created_by')
+                ->nullable()
+                ->constrained('users')
+                ->nullOnDelete();
+
+            // Indexes AFTER columns
+            $table->index('status');
+            $table->index('user_type');
+            // optional:
+            // $table->index('is_super_admin');
+
             $table->timestamps();
             $table->softDeletes();
         });
+
         Schema::create('password_reset_tokens', function (Blueprint $table) {
             $table->string('email', 191)->primary();
             $table->string('token');
             $table->timestamp('created_at')->nullable();
         });
+
         Schema::create('sessions', function (Blueprint $table) {
             $table->string('id')->primary();
             $table->foreignId('user_id')->nullable()->constrained('users')->nullOnDelete()->index();
