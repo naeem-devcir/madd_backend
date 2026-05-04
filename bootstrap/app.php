@@ -20,6 +20,12 @@ return Application::configure(basePath: dirname(__DIR__))
             'permission' => PermissionMiddleware::class,
             'role_or_permission' => RoleOrPermissionMiddleware::class,
         ]);
+
+        $middleware->preventRequestsDuringMaintenance(
+            except: [
+                'api/v1/admin/system/*',
+            ]
+        );
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

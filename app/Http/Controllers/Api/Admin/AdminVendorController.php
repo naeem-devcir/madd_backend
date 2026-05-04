@@ -61,6 +61,14 @@ class AdminVendorController extends Controller
             });
         }
 
+        if ($request->get('paginate') === 'false') {
+            $vendors = $query->orderBy('company_name', 'asc')->get();
+            return response()->json([
+                'success' => true,
+                'data' => VendorResource::collection($vendors),
+            ]);
+        }
+
         $vendors = $query->orderBy('created_at', 'desc')
             ->paginate($request->get('per_page', 20));
 
