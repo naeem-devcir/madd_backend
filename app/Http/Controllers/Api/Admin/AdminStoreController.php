@@ -6,238 +6,132 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\Admin\StoreVendorStoreRequest;
 use App\Http\Resources\VendorStoreResource;
 use App\Models\Config\Domain;
-use App\Models\Config\SalesPolicy;
-use App\Models\Config\Theme;
 use App\Models\Review\Review;
 use App\Models\Vendor\Vendor;
 use App\Models\Vendor\VendorStore;
+use App\Services\Store\StoreService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class AdminStoreController extends Controller
 {
+    public function __construct(protected StoreService $storeService) {}
+
+    // -------------------------------------------------------------------------
+    // LISTING
+    // -------------------------------------------------------------------------
+
     /**
-     * Get ALL stores (global)
+     * GET /admin/stores
+     *
+     * Read mode: local tables only
+     * Query params: vendor_id, status, country_code, search, per_page
      */
-    public function index(Request $request)
+    public function index(Request $request): JsonResponse
     {
         try {
             $query = VendorStore::with(['vendor', 'domain', 'theme']);
 
-            // Apply filters
-            if ($request->has('vendor_id')) {
+            if ($request->filled('vendor_id')) {
                 $query->where('vendor_id', $request->vendor_id);
             }
 
-            if ($request->has('status')) {
+            if ($request->filled('status')) {
                 $query->where('status', $request->status);
             }
 
-            if ($request->has('country_code')) {
+            if ($request->filled('country_code')) {
                 $query->where('country_code', $request->country_code);
             }
 
-            if ($request->has('search')) {
-                $query->where(function ($q) use ($request) {
-                    $q->where('store_name', 'like', '%' . $request->search . '%')
-                        ->orWhere('store_slug', 'like', '%' . $request->search . '%')
-                        ->orWhere('subdomain', 'like', '%' . $request->search . '%');
+            if ($request->filled('search')) {
+                $term = '%' . addcslashes($request->search, '%_') . '%';
+                $query->where(function ($q) use ($term) {
+                    $q->where('store_name', 'like', $term)
+                        ->orWhere('store_slug', 'like', $term)
+                        ->orWhere('subdomain', 'like', $term);
                 });
             }
 
-            $stores = $query->latest()->paginate($request->get('per_page', 20));
+            $perPage = min((int) $request->input('per_page', 20), 100);
+            $stores  = $query->latest()->paginate($perPage);
+
+            // Scoped counts so filters are reflected in meta
+            $countQuery = VendorStore::when($request->filled('vendor_id'), fn ($q) => $q->where('vendor_id', $request->vendor_id));
 
             return response()->json([
                 'success' => true,
-                'data' => VendorStoreResource::collection($stores),
-                'meta' => [
-                    'current_page' => $stores->currentPage(),
-                    'last_page' => $stores->lastPage(),
-                    'total' => $stores->total(),
-                    'per_page' => $stores->perPage(),
-                    'total_records' => VendorStore::count(),
-                    'active' => VendorStore::where('status', 'active')->count(),
-                    'inactive' => VendorStore::where('status', 'inactive')->count(),
-                ]
-            ]);
-        } catch (\Exception $e) {
-            Log::error('Failed to fetch stores', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'data'    => VendorStoreResource::collection($stores),
+                'meta'    => [
+                    'current_page'  => $stores->currentPage(),
+                    'last_page'     => $stores->lastPage(),
+                    'per_page'      => $stores->perPage(),
+                    'total'         => $stores->total(),
+                    'active'        => (clone $countQuery)->where('status', 'active')->count(),
+                    'inactive'      => (clone $countQuery)->where('status', 'inactive')->count(),
+                ],
             ]);
 
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to fetch stores: ' . $e->getMessage(),
-            ], 500);
+        } catch (Throwable $e) {
+            return $this->serverError('Failed to fetch stores', $e);
         }
     }
 
-    /**
-     * Create a new store for a vendor (admin adds store manually)
-     */
-    public function store(StoreVendorStoreRequest $request)
-    {
-        DB::beginTransaction();
+    // -------------------------------------------------------------------------
+    // CREATE
+    // -------------------------------------------------------------------------
 
+    /**
+     * POST /admin/stores
+     *
+     * Write flow: Magento store group first → local VendorStore with magento reference
+     * All stores go under website_id = vendor->magento_website_id (default 1 for shared setups)
+     */
+    public function store(StoreVendorStoreRequest $request): JsonResponse
+    {
         try {
-            // Check if vendor exists and is valid
             $vendor = Vendor::findOrFail($request->vendor_id);
 
-            // Check if vendor has reached store limit based on their plan
-            $storeLimit = $this->getVendorStoreLimit($vendor);
+            $storeLimit        = $this->storeService->getVendorStoreLimit($vendor);
             $currentStoreCount = VendorStore::where('vendor_id', $vendor->id)->count();
 
             if ($currentStoreCount >= $storeLimit) {
                 return response()->json([
                     'success' => false,
-                    'message' => "Vendor has reached the maximum store limit of {$storeLimit} stores based on their plan.",
+                    'message' => "Vendor has reached the maximum store limit of {$storeLimit} for their plan.",
                 ], 422);
             }
 
-            // Generate unique slug if not provided or if duplicate
-            $slug = $request->store_slug;
-            if (VendorStore::where('store_slug', $slug)->exists()) {
-                $slug = $slug . '-' . Str::random(4);
-            }
-
-            // Handle subdomain uniqueness
-            $subdomain = $request->subdomain;
-            if ($subdomain && VendorStore::where('subdomain', $subdomain)->exists()) {
-                $subdomain = $subdomain . '-' . Str::random(3);
-            }
-
-            // Create the store
-            $store = VendorStore::create([
-                'uuid' => (string) Str::uuid(),
-                'vendor_id' => $vendor->id,
-                'store_name' => $request->store_name,
-                'store_slug' => $slug,
-                'country_code' => $request->country_code,
-                'language_code' => $request->language_code ?? 'en',
-                'currency_code' => $request->currency_code ?? 'EUR',
-                'timezone' => $request->timezone ?? $vendor->timezone ?? 'UTC',
-                'subdomain' => $subdomain,
-                'domain_id' => $request->domain_id,
-                'magento_store_id' => $request->magento_store_id,
-                'magento_store_group_id' => $request->magento_store_group_id,
-                'magento_website_id' => $request->magento_website_id,
-                'theme_id' => $request->theme_id,
-                'status' => $request->status ?? 'inactive',
-                'sales_policy_id' => $request->sales_policy_id,
-                'logo_url' => $request->logo_url,
-                'favicon_url' => $request->favicon_url,
-                'banner_url' => $request->banner_url,
-                'primary_color' => $request->primary_color ?? '#000000',
-                'secondary_color' => $request->secondary_color ?? '#666666',
-                'contact_email' => $request->contact_email ?? $vendor->contact_email,
-                'contact_phone' => $request->contact_phone ?? $vendor->phone,
-                'seo_meta_title' => $request->seo_meta_title,
-                'seo_meta_description' => $request->seo_meta_description,
-                'seo_settings' => $request->seo_settings,
-                'payment_methods' => $request->payment_methods,
-                'shipping_methods' => $request->shipping_methods,
-                'tax_settings' => $request->tax_settings,
-                'social_links' => $request->social_links,
-                'google_analytics_id' => $request->google_analytics_id,
-                'facebook_pixel_id' => $request->facebook_pixel_id,
-                'custom_css' => $request->custom_css,
-                'custom_js' => $request->custom_js,
-                'is_demo' => $request->is_demo ?? false,
-                'address' => $request->address,
-                'metadata' => $request->metadata,
-                'activated_at' => $request->status === 'active' ? now() : null,
-            ]);
-
-            // If status is active, set activated_at timestamp
-            if ($request->status === 'active') {
-                $store->update(['activated_at' => now()]);
-            }
-
-            // If domain is provided, create domain record with correct enum value
-            if ($request->has('domain') && $request->domain) {
-                // Check if domain already exists
-                $existingDomain = Domain::where('domain', $request->domain)->first();
-
-                if (!$existingDomain) {
-                    $domain = Domain::create([
-                        'uuid' => (string) Str::uuid(),
-                        'vendor_store_id' => $store->id,
-                        'domain' => $request->domain,
-                        'type' => 'vendor_custom',
-                        'verification_token' => Str::random(32),
-                        'verified_at' => null,
-                        'is_active' => true,
-                    ]);
-                    $store->update(['domain_id' => $domain->id]);
-                } else {
-                    // Domain exists, just associate it
-                    $store->update(['domain_id' => $existingDomain->id]);
-                }
-            }
-
-            // If subdomain is provided, also create a domain record for it
-            if ($subdomain && !$request->has('domain')) {
-                $subdomainDomain = Domain::create([
-                    'uuid' => (string) Str::uuid(),
-                    'vendor_store_id' => $store->id,
-                    'domain' => $subdomain . '.' . config('app.domain', 'example.com'),
-                    'type' => 'madd_subdomain',
-                    'verification_token' => Str::random(32),
-                    'verified_at' => now(),
-                    'is_active' => true,
-                ]);
-
-                // Only set as domain_id if no custom domain was provided
-                if (!$store->domain_id) {
-                    $store->update(['domain_id' => $subdomainDomain->id]);
-                }
-            }
-
-            DB::commit();
-
-            // Load relationships for response
-            $store->load(['vendor', 'domain', 'theme']);
+            $store = $this->storeService->create($request->validated());
 
             return response()->json([
                 'success' => true,
-                'message' => 'Store created successfully for vendor: ' . $vendor->company_name,
-                'data' => new VendorStoreResource($store),
+                'message' => "Store created in Magento and Laravel successfully for vendor: {$vendor->company_name}",
+                'data'    => new VendorStoreResource($store),
             ], 201);
-        } catch (\Exception $e) {
-            DB::rollBack();
-            Log::error('Failed to create store', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-                'request_data' => $request->all(),
-            ]);
 
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to create store: ' . $e->getMessage(),
-            ], 500);
+        } catch (ValidationException $e) {
+            return $this->validationError($e);
+        } catch (Throwable $e) {
+            return $this->serverError('Failed to create store', $e);
         }
     }
 
-    /**
-     * Get vendor's store limit based on their plan
-     */
-    private function getVendorStoreLimit(Vendor $vendor): int
-    {
-        if ($vendor->plan && isset($vendor->plan->max_stores)) {
-            return $vendor->plan->max_stores;
-        }
-
-        return 1; // Default limit
-    }
+    // -------------------------------------------------------------------------
+    // SHOW
+    // -------------------------------------------------------------------------
 
     /**
-     * Show store (Admin can access ANY store) - Using UUID
+     * GET /admin/stores/{uuid}
+     *
+     * Read mode: local tables only
      */
-    public function show($uuid)
+    public function show(string $uuid): JsonResponse
     {
         try {
             $store = VendorStore::where('uuid', $uuid)
@@ -246,388 +140,392 @@ class AdminStoreController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => new VendorStoreResource($store)
-            ]);
-        } catch (ModelNotFoundException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Store not found with UUID: ' . $uuid,
-            ], 404);
-        } catch (\Exception $e) {
-            Log::error('Failed to fetch store', [
-                'uuid' => $uuid,
-                'error' => $e->getMessage()
+                'data'    => new VendorStoreResource($store),
             ]);
 
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to fetch store: ' . $e->getMessage(),
-            ], 500);
+        } catch (ModelNotFoundException) {
+            return $this->notFound($uuid);
+        } catch (Throwable $e) {
+            return $this->serverError('Failed to fetch store', $e);
         }
     }
 
+    // -------------------------------------------------------------------------
+    // UPDATE
+    // -------------------------------------------------------------------------
+
     /**
-     * Update store (admin override) - Using UUID
+     * PUT /admin/stores/{uuid}
+     *
+     * Write flow: Magento store group update first → local VendorStore updated
      */
-    public function update(Request $request, $uuid)
+    public function update(Request $request, string $uuid): JsonResponse
     {
         try {
             $store = VendorStore::where('uuid', $uuid)->firstOrFail();
 
-            $request->validate([
-                'store_name' => 'sometimes|string|max:255',
-                'store_slug' => 'sometimes|string|max:255|regex:/^[a-z0-9-]+$/|unique:vendor_stores,store_slug,' . $store->id,
-                'status' => 'sometimes|in:inactive,active,suspended,maintenance',
-                'country_code' => 'sometimes|string|size:2',
-                'language_code' => 'sometimes|string|size:2',
-                'currency_code' => 'sometimes|string|size:3',
-                'subdomain' => 'nullable|string|max:100|unique:vendor_stores,subdomain,' . $store->id,
-                'primary_color' => 'nullable|string|regex:/^#[a-fA-F0-9]{6}$/',
-                'secondary_color' => 'nullable|string|regex:/^#[a-fA-F0-9]{6}$/',
-                'contact_email' => 'nullable|email',
-                'contact_phone' => 'nullable|string|max:20',
+            $validated = $request->validate([
+                'store_name'           => 'sometimes|string|max:255',
+                'store_slug'           => [
+                    'sometimes', 'string', 'max:255', 'regex:/^[a-z0-9-]+$/',
+                    \Illuminate\Validation\Rule::unique('vendor_stores', 'store_slug')->ignore($store->id),
+                ],
+                'status'               => 'sometimes|in:inactive,active,suspended,maintenance',
+                'country_code'         => 'sometimes|string|size:2',
+                'language_code'        => 'sometimes|string|size:2',
+                'currency_code'        => 'sometimes|string|size:3',
+                'subdomain'            => [
+                    'nullable', 'string', 'max:100',
+                    \Illuminate\Validation\Rule::unique('vendor_stores', 'subdomain')->ignore($store->id),
+                ],
+                'primary_color'        => 'nullable|string|regex:/^#[a-fA-F0-9]{6}$/',
+                'secondary_color'      => 'nullable|string|regex:/^#[a-fA-F0-9]{6}$/',
+                'contact_email'        => 'nullable|email',
+                'contact_phone'        => 'nullable|string|max:20',
+                'theme_id'             => 'nullable|exists:themes,id',
+                'sales_policy_id'      => 'nullable|exists:sales_policies,id',
+                'logo_url'             => 'nullable|url|max:500',
+                'favicon_url'          => 'nullable|url|max:500',
+                'banner_url'           => 'nullable|url|max:500',
+                'seo_meta_title'       => 'nullable|string|max:255',
+                'seo_meta_description' => 'nullable|string|max:500',
+                'seo_settings'         => 'nullable|array',
+                'payment_methods'      => 'nullable|array',
+                'shipping_methods'     => 'nullable|array',
+                'tax_settings'         => 'nullable|array',
+                'social_links'         => 'nullable|array',
+                'google_analytics_id'  => 'nullable|string|max:50',
+                'facebook_pixel_id'    => 'nullable|string|max:50',
+                'custom_css'           => 'nullable|string',
+                'custom_js'            => 'nullable|string',
+                'is_demo'              => 'sometimes|boolean',
+                'address'              => 'nullable|array',
+                'metadata'             => 'nullable|array',
             ]);
 
-            DB::beginTransaction();
+            $store = $this->storeService->update($store, $validated);
 
-            // If status is changing to active, set activated_at
-            $updateData = $request->all();
-            if ($request->has('status') && $request->status === 'active' && $store->status !== 'active') {
-                $updateData['activated_at'] = now();
+            return response()->json([
+                'success' => true,
+                'message' => 'Store updated in Magento and Laravel successfully',
+                'data'    => new VendorStoreResource($store),
+            ]);
+
+        } catch (ValidationException $e) {
+            return $this->validationError($e);
+        } catch (ModelNotFoundException) {
+            return $this->notFound($uuid);
+        } catch (Throwable $e) {
+            return $this->serverError('Failed to update store', $e);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // DELETE / RESTORE
+    // -------------------------------------------------------------------------
+
+    /**
+     * DELETE /admin/stores/{uuid}
+     *
+     * Write flow: Magento store group deleted → local soft-delete
+     */
+    public function destroy(string $uuid): JsonResponse
+    {
+        try {
+            $store        = VendorStore::where('uuid', $uuid)->firstOrFail();
+            $magentoResult = $this->storeService->delete($store);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Store deleted from Magento and Laravel successfully',
+                'data'    => ['magento' => $magentoResult],
+            ]);
+
+        } catch (ModelNotFoundException) {
+            return $this->notFound($uuid);
+        } catch (Throwable $e) {
+            return $this->serverError('Failed to delete store', $e);
+        }
+    }
+
+    /**
+     * DELETE /admin/stores/{uuid}/force
+     *
+     * Write flow: Magento store group deleted → local hard-delete with domains
+     */
+    public function forceDelete(string $uuid): JsonResponse
+    {
+        try {
+            $store        = VendorStore::withTrashed()->where('uuid', $uuid)->firstOrFail();
+            $magentoResult = $this->storeService->delete($store, force: true);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Store permanently deleted from Magento and Laravel',
+                'data'    => ['magento' => $magentoResult],
+            ]);
+
+        } catch (ModelNotFoundException) {
+            return $this->notFound($uuid);
+        } catch (Throwable $e) {
+            return $this->serverError('Failed to permanently delete store', $e);
+        }
+    }
+
+    /**
+     * POST /admin/stores/{uuid}/restore
+     *
+     * Read/write local only — restores soft-deleted store and its domains
+     */
+    public function restore(string $uuid): JsonResponse
+    {
+        try {
+            $store = VendorStore::withTrashed()->where('uuid', $uuid)->firstOrFail();
+
+            if (! $store->trashed()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Store is not deleted, nothing to restore',
+                ], 422);
             }
 
-            $store->update($updateData);
-
-            DB::commit();
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Store updated successfully',
-                'data' => new VendorStoreResource($store->fresh(['vendor', 'domain', 'theme']))
-            ]);
-        } catch (ModelNotFoundException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Store not found with UUID: ' . $uuid,
-            ], 404);
-        } catch (\Exception $e) {
-            DB::rollBack();
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to update store: ' . $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Delete store (admin) - Soft delete - Using UUID
-     */
-    public function destroy($uuid)
-    {
-        try {
-            $store = VendorStore::where('uuid', $uuid)->firstOrFail();
-
-            DB::beginTransaction();
-
-            // Delete all domains for this store
-            Domain::where('vendor_store_id', $store->id)->delete();
-
-            // Soft delete the store
-            $store->delete();
-
-            DB::commit();
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Store deleted successfully'
-            ]);
-        } catch (ModelNotFoundException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Store not found with UUID: ' . $uuid,
-            ], 404);
-        } catch (\Exception $e) {
-            DB::rollBack();
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to delete store: ' . $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Force delete store (permanent) - Using UUID
-     */
-    public function forceDelete($uuid)
-    {
-        try {
-            $store = VendorStore::withTrashed()->where('uuid', $uuid)->firstOrFail();
-
-            DB::beginTransaction();
-
-            // Force delete all associated domains
-            Domain::where('vendor_store_id', $store->id)->forceDelete();
-
-            // Force delete the store
-            $store->forceDelete();
-
-            DB::commit();
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Store permanently deleted'
-            ]);
-        } catch (ModelNotFoundException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Store not found with UUID: ' . $uuid,
-            ], 404);
-        } catch (\Exception $e) {
-            DB::rollBack();
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to permanently delete store: ' . $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Restore soft-deleted store - Using UUID
-     */
-    public function restore($uuid)
-    {
-        try {
-            $store = VendorStore::withTrashed()->where('uuid', $uuid)->firstOrFail();
-
-            DB::beginTransaction();
-
-            $store->restore();
-
-            // Restore associated domains
-            Domain::withTrashed()->where('vendor_store_id', $store->id)->restore();
-
-            DB::commit();
+            DB::transaction(function () use ($store) {
+                $store->restore();
+                Domain::withTrashed()->where('vendor_store_id', $store->id)->restore();
+            });
 
             return response()->json([
                 'success' => true,
                 'message' => 'Store restored successfully',
-                'data' => new VendorStoreResource($store->fresh(['vendor', 'domain', 'theme']))
+                'data'    => new VendorStoreResource($store->fresh(['vendor', 'domain', 'theme'])),
             ]);
-        } catch (ModelNotFoundException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Store not found with UUID: ' . $uuid,
-            ], 404);
-        } catch (\Exception $e) {
-            DB::rollBack();
 
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to restore store: ' . $e->getMessage()
-            ], 500);
+        } catch (ModelNotFoundException) {
+            return $this->notFound($uuid);
+        } catch (Throwable $e) {
+            return $this->serverError('Failed to restore store', $e);
         }
     }
 
+    // -------------------------------------------------------------------------
+    // STATUS SHORTCUTS
+    // -------------------------------------------------------------------------
+
     /**
-     * Activate store (admin force) - Using UUID
+     * POST /admin/stores/{uuid}/activate
+     *
+     * Write flow: Magento store group enabled → local status = active
      */
-    public function activate($uuid)
+    public function activate(string $uuid): JsonResponse
     {
         try {
             $store = VendorStore::where('uuid', $uuid)->firstOrFail();
 
-            $store->update([
-                'status' => 'active',
-                'activated_at' => now()
-            ]);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Store activated successfully',
-                'data' => new VendorStoreResource($store->fresh(['vendor', 'domain', 'theme']))
-            ]);
-        } catch (ModelNotFoundException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Store not found with UUID: ' . $uuid,
-            ], 404);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to activate store: ' . $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Deactivate store - Using UUID
-     */
-    public function deactivate($uuid)
-    {
-        try {
-            $store = VendorStore::where('uuid', $uuid)->firstOrFail();
-
-            $store->update(['status' => 'inactive']);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Store deactivated successfully',
-                'data' => new VendorStoreResource($store->fresh(['vendor', 'domain', 'theme']))
-            ]);
-        } catch (ModelNotFoundException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Store not found with UUID: ' . $uuid,
-            ], 404);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to deactivate store: ' . $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Admin add domain to store - Using UUID
-     */
-    public function addDomain(Request $request, $uuid)
-    {
-        try {
-            $store = VendorStore::where('uuid', $uuid)->firstOrFail();
-
-            $request->validate([
-                'domain' => 'required|string|unique:domains,domain',
-                'verified' => 'sometimes|boolean',
-                'type' => 'sometimes|in:madd_subdomain,vendor_custom,marketplace',
-                'set_as_primary' => 'sometimes|boolean'
-            ]);
-
-            $domainType = $request->type ?? 'vendor_custom';
-
-            // Validate that the type is one of the allowed enum values
-            if (!in_array($domainType, ['madd_subdomain', 'vendor_custom', 'marketplace'])) {
+            if ($store->status === 'active') {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Invalid domain type. Allowed types: madd_subdomain, vendor_custom, marketplace'
+                    'message' => 'Store is already active',
                 ], 422);
             }
 
-            $domain = Domain::create([
-                'uuid' => (string) Str::uuid(),
-                'vendor_store_id' => $store->id,
-                'domain' => $request->domain,
-                'type' => $domainType,
-                'verification_token' => Str::random(32),
-                'verified_at' => $request->verified ? now() : null,
-                'is_active' => true,
+            $store = $this->storeService->update($store, [
+                'status'       => 'active',
+                'activated_at' => now(),
             ]);
 
-            // Update store's domain_id if this is the primary domain
-            if (!$store->domain_id || $request->has('set_as_primary')) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Store activated in Magento and Laravel successfully',
+                'data'    => new VendorStoreResource($store),
+            ]);
+
+        } catch (ModelNotFoundException) {
+            return $this->notFound($uuid);
+        } catch (Throwable $e) {
+            return $this->serverError('Failed to activate store', $e);
+        }
+    }
+
+    /**
+     * POST /admin/stores/{uuid}/deactivate
+     *
+     * Write flow: Magento store group disabled → local status = inactive
+     */
+    public function deactivate(string $uuid): JsonResponse
+    {
+        try {
+            $store = VendorStore::where('uuid', $uuid)->firstOrFail();
+
+            if ($store->status === 'inactive') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Store is already inactive',
+                ], 422);
+            }
+
+            $store = $this->storeService->update($store, ['status' => 'inactive']);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Store deactivated in Magento and Laravel successfully',
+                'data'    => new VendorStoreResource($store),
+            ]);
+
+        } catch (ModelNotFoundException) {
+            return $this->notFound($uuid);
+        } catch (Throwable $e) {
+            return $this->serverError('Failed to deactivate store', $e);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // DOMAIN
+    // -------------------------------------------------------------------------
+
+    /**
+     * POST /admin/stores/{uuid}/domain
+     */
+    public function addDomain(Request $request, string $uuid): JsonResponse
+    {
+        try {
+            $store = VendorStore::where('uuid', $uuid)->firstOrFail();
+
+            $validated = $request->validate([
+                'domain'         => 'required|string|max:255|unique:domains,domain',
+                'type'           => 'sometimes|in:madd_subdomain,vendor_custom,marketplace',
+                'verified'       => 'sometimes|boolean',
+                'set_as_primary' => 'sometimes|boolean',
+            ]);
+
+            $domain = Domain::create([
+                'uuid'               => (string) Str::uuid(),
+                'vendor_store_id'    => $store->id,
+                'domain'             => $validated['domain'],
+                'type'               => $validated['type'] ?? 'vendor_custom',
+                'verification_token' => Str::random(32),
+                'verified_at'        => ! empty($validated['verified']) ? now() : null,
+                'is_active'          => true,
+            ]);
+
+            if (! $store->domain_id || ! empty($validated['set_as_primary'])) {
                 $store->update(['domain_id' => $domain->id]);
             }
 
             return response()->json([
                 'success' => true,
                 'message' => 'Domain added successfully',
-                'data' => $domain
+                'data'    => $domain,
             ]);
-        } catch (ModelNotFoundException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Store not found with UUID: ' . $uuid,
-            ], 404);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to add domain: ' . $e->getMessage()
-            ], 500);
+
+        } catch (ValidationException $e) {
+            return $this->validationError($e);
+        } catch (ModelNotFoundException) {
+            return $this->notFound($uuid);
+        } catch (Throwable $e) {
+            return $this->serverError('Failed to add domain', $e);
         }
     }
 
+    // -------------------------------------------------------------------------
+    // STATS
+    // -------------------------------------------------------------------------
+
     /**
-     * Get store analytics and statistics - Using UUID
+     * GET /admin/stores/{uuid}/stats
+     *
+     * Read mode: local tables only
      */
-    public function stats($uuid)
+    public function stats(string $uuid): JsonResponse
     {
         try {
             $store = VendorStore::where('uuid', $uuid)->firstOrFail();
 
-            $reviewQuery = Review::where('vendor_store_id', $store->id);
-            $orders = $store->orders();
+            // Load all order aggregates in a single query to avoid N+1
+            $orderStats = DB::table('orders')
+                ->where('vendor_store_id', $store->id)
+                ->selectRaw("
+                    COUNT(*)                                                      AS total,
+                    SUM(grand_total)                                              AS revenue,
+                    SUM(CASE WHEN status = 'pending'    THEN 1 ELSE 0 END)       AS pending,
+                    SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END)       AS processing,
+                    SUM(CASE WHEN status = 'completed'  THEN 1 ELSE 0 END)       AS completed,
+                    SUM(CASE WHEN status = 'cancelled'  THEN 1 ELSE 0 END)       AS cancelled,
+                    SUM(CASE WHEN created_at >= ? THEN grand_total ELSE 0 END)   AS last_30_days_revenue
+                ", [now()->subDays(30)])
+                ->first();
 
-            $totalRevenue = $orders->sum('grand_total');
-            $totalOrders = $orders->count();
-            $averageOrderValue = $totalOrders > 0 ? $totalRevenue / $totalOrders : 0;
+            $totalOrders   = (int)   ($orderStats->total ?? 0);
+            $totalRevenue  = (float) ($orderStats->revenue ?? 0);
+
+            $reviewStats = Review::where('vendor_store_id', $store->id)
+                ->selectRaw('AVG(rating) as avg_rating, COUNT(*) as total')
+                ->first();
+
+            $ratingBreakdown = Review::where('vendor_store_id', $store->id)
+                ->selectRaw('rating, COUNT(*) as count')
+                ->groupBy('rating')
+                ->orderByDesc('rating')
+                ->get();
 
             return response()->json([
                 'success' => true,
-                'data' => [
+                'data'    => [
                     'store_info' => [
-                        'id' => $store->id,
-                        'uuid' => $store->uuid,
-                        'name' => $store->store_name,
-                        'slug' => $store->store_slug,
+                        'id'     => $store->id,
+                        'uuid'   => $store->uuid,
+                        'name'   => $store->store_name,
+                        'slug'   => $store->store_slug,
                         'status' => $store->status,
                     ],
                     'products' => [
-                        'total' => $store->products()->count(),
-                        'active' => $store->products()->where('status', 'active')->count(),
+                        'total'        => $store->products()->count(),
+                        'active'       => $store->products()->where('status', 'active')->count(),
                         'out_of_stock' => $store->products()->where('stock_quantity', '<=', 0)->count(),
                     ],
                     'orders' => [
-                        'total' => $totalOrders,
-                        'pending' => $orders->clone()->where('status', 'pending')->count(),
-                        'processing' => $orders->clone()->where('status', 'processing')->count(),
-                        'completed' => $orders->clone()->where('status', 'completed')->count(),
-                        'cancelled' => $orders->clone()->where('status', 'cancelled')->count(),
+                        'total'      => $totalOrders,
+                        'pending'    => (int) ($orderStats->pending    ?? 0),
+                        'processing' => (int) ($orderStats->processing ?? 0),
+                        'completed'  => (int) ($orderStats->completed  ?? 0),
+                        'cancelled'  => (int) ($orderStats->cancelled  ?? 0),
                     ],
                     'revenue' => [
-                        'total' => $totalRevenue,
-                        'average_order_value' => round($averageOrderValue, 2),
-                        'last_30_days' => $orders->clone()->where('created_at', '>=', now()->subDays(30))->sum('grand_total'),
+                        'total'               => $totalRevenue,
+                        'average_order_value' => $totalOrders > 0 ? round($totalRevenue / $totalOrders, 2) : 0,
+                        'last_30_days'        => (float) ($orderStats->last_30_days_revenue ?? 0),
                     ],
                     'ratings' => [
-                        'average' => round($reviewQuery->avg('rating') ?? 0, 1),
-                        'total_reviews' => $reviewQuery->count(),
-                        'by_rating' => $reviewQuery->selectRaw('rating, count(*) as count')
-                            ->groupBy('rating')
-                            ->orderBy('rating', 'desc')
-                            ->get()
+                        'average'       => round((float) ($reviewStats->avg_rating ?? 0), 1),
+                        'total_reviews' => (int) ($reviewStats->total ?? 0),
+                        'by_rating'     => $ratingBreakdown,
                     ],
-                ]
-            ]);
-        } catch (ModelNotFoundException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Store not found with UUID: ' . $uuid,
-            ], 404);
-        } catch (\Exception $e) {
-            Log::error('Failed to fetch store stats', [
-                'uuid' => $uuid,
-                'error' => $e->getMessage()
+                ],
             ]);
 
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to fetch store statistics: ' . $e->getMessage(),
-            ], 500);
+        } catch (ModelNotFoundException) {
+            return $this->notFound($uuid);
+        } catch (Throwable $e) {
+            return $this->serverError('Failed to fetch store statistics', $e);
         }
     }
 
+    // -------------------------------------------------------------------------
+    // VENDOR-SCOPED LISTING
+    // -------------------------------------------------------------------------
+
     /**
-     * Get stores by vendor UUID
+     * GET /admin/stores/by-vendor/{vendorId}
+     *
+     * vendorId can be numeric ID or UUID
+     * Read mode: local tables only
      */
-    public function getStoresByVendor($vendorUuid)
+    public function getStoresByVendor(string $vendorId): JsonResponse
     {
         try {
-            // Find vendor by UUID
-            $vendor = Vendor::where('uuid', $vendorUuid)->firstOrFail();
+            $vendor = is_numeric($vendorId)
+                ? Vendor::findOrFail($vendorId)
+                : Vendor::where('uuid', $vendorId)->firstOrFail();
 
-            // Get stores using vendor's internal ID
             $stores = VendorStore::where('vendor_id', $vendor->id)
                 ->with(['domain', 'theme'])
                 ->latest()
@@ -635,85 +533,111 @@ class AdminStoreController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => [
+                'data'    => [
                     'vendor' => [
-                        'id' => $vendor->id,
-                        'uuid' => $vendor->uuid,
+                        'id'           => $vendor->id,
+                        'uuid'         => $vendor->uuid,
                         'company_name' => $vendor->company_name,
-                        'email' => $vendor->user->email ?? null,
-                        'status' => $vendor->status,
+                        'email'        => $vendor->user->email ?? null,
+                        'status'       => $vendor->status,
                     ],
-                    'stores' => VendorStoreResource::collection($stores),
-                    'total_stores' => $stores->count(),
-                    'active_stores' => $stores->where('status', 'active')->count(),
-                    'max_stores_allowed' => $this->getVendorStoreLimit($vendor),
-                ]
-            ]);
-        } catch (ModelNotFoundException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Vendor not found with UUID: ' . $vendorUuid,
-            ], 404);
-        } catch (\Exception $e) {
-            Log::error('Failed to get stores by vendor', [
-                'vendor_uuid' => $vendorUuid,
-                'error' => $e->getMessage(),
+                    'stores'             => VendorStoreResource::collection($stores),
+                    'total_stores'       => $stores->count(),
+                    'active_stores'      => $stores->where('status', 'active')->count(),
+                    'max_stores_allowed' => $this->storeService->getVendorStoreLimit($vendor),
+                ],
             ]);
 
+        } catch (ModelNotFoundException) {
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to retrieve stores: ' . $e->getMessage(),
-            ], 500);
+                'message' => "Vendor not found: {$vendorId}",
+            ], 404);
+        } catch (Throwable $e) {
+            return $this->serverError('Failed to retrieve stores', $e);
         }
     }
 
+    // -------------------------------------------------------------------------
+    // BULK
+    // -------------------------------------------------------------------------
+
     /**
-     * Bulk update store status (uses IDs, not UUIDs for bulk operations)
+     * POST /admin/stores/bulk-status
+     *
+     * Write flow: each store goes through storeService->update (Magento + local)
+     * Returns 207 if any stores failed
      */
-    public function bulkStatusUpdate(Request $request)
+    public function bulkStatusUpdate(Request $request): JsonResponse
     {
         try {
-            $request->validate([
-                'store_ids' => 'required|array',
-                'store_ids.*' => 'exists:vendor_stores,id',
-                'status' => 'required|in:inactive,active,suspended,maintenance'
+            $validated = $request->validate([
+                'store_ids'   => 'required|array|min:1|max:50',
+                'store_ids.*' => 'required|integer|exists:vendor_stores,id',
+                'status'      => 'required|in:inactive,active,suspended,maintenance',
             ]);
 
-            DB::beginTransaction();
+            $updated = [];
+            $failed  = [];
 
-            $updatedCount = VendorStore::whereIn('id', $request->store_ids)
-                ->update(['status' => $request->status]);
-
-            // If status is active, update activated_at for those stores
-            if ($request->status === 'active') {
-                VendorStore::whereIn('id', $request->store_ids)
-                    ->whereNull('activated_at')
-                    ->update(['activated_at' => now()]);
+            foreach (VendorStore::whereIn('id', $validated['store_ids'])->get() as $store) {
+                try {
+                    $this->storeService->update($store, ['status' => $validated['status']]);
+                    $updated[] = $store->id;
+                } catch (Throwable $e) {
+                    $failed[] = ['store_id' => $store->id, 'message' => $e->getMessage()];
+                }
             }
 
-            DB::commit();
+            $updatedCount = count($updated);
+            $status       = empty($failed) ? 200 : 207;
 
             return response()->json([
-                'success' => true,
-                'message' => "{$updatedCount} stores have been updated to {$request->status} status",
-                'data' => [
+                'success' => empty($failed),
+                'message' => "{$updatedCount} store(s) updated to '{$validated['status']}'",
+                'data'    => [
                     'updated_count' => $updatedCount,
-                    'status' => $request->status
-                ]
-            ]);
-        } catch (\Illuminate\Validation\ValidationException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Validation failed',
-                'errors' => $e->errors()
-            ], 422);
-        } catch (\Exception $e) {
-            DB::rollBack();
+                    'status'        => $validated['status'],
+                    'updated'       => $updated,
+                    'failed'        => $failed,
+                ],
+            ], $status);
 
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to update stores: ' . $e->getMessage()
-            ], 500);
+        } catch (ValidationException $e) {
+            return $this->validationError($e);
+        } catch (Throwable $e) {
+            return $this->serverError('Failed to bulk update stores', $e);
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // HELPERS
+    // -------------------------------------------------------------------------
+
+    private function notFound(string $uuid): JsonResponse
+    {
+        return response()->json([
+            'success' => false,
+            'message' => "Store not found: {$uuid}",
+        ], 404);
+    }
+
+    private function validationError(ValidationException $e): JsonResponse
+    {
+        return response()->json([
+            'success' => false,
+            'message' => 'Validation failed',
+            'errors'  => $e->errors(),
+        ], 422);
+    }
+
+    private function serverError(string $message, Throwable $e): JsonResponse
+    {
+        report($e);
+        return response()->json([
+            'success' => false,
+            'message' => $message,
+            'error'   => config('app.debug') ? $e->getMessage() : 'Internal server error',
+        ], 500);
     }
 }

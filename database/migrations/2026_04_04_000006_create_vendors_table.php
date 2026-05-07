@@ -65,6 +65,19 @@ return new class extends Migration
 
             // Integrations
             $table->integer('magento_website_id')->nullable()->index();
+            $table->string('magento_base_url')->nullable();
+            $table->text('magento_admin_pass')->nullable();
+            $table->text('magento_access_token')->nullable();
+
+            $table->string('magento_admin_token')->nullable();
+            $table->string('magento_admin_username')->nullable();
+            $table->integer('magento_store_group_id')->nullable();
+            $table->integer('magento_root_category_id')->nullable();
+            $table->timestamp('magento_token_expires_at')->nullable();
+            $table->timestamp('magento_synced_at')->nullable();
+
+
+
 
             // KYC
             $table->enum('kyc_status', ['pending', 'verified', 'rejected'])->default('pending');

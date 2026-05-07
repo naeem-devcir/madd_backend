@@ -43,50 +43,64 @@ class SyncProductToMagento implements ShouldQueue
         try {
             if ($this->isDraft) {
                 $draft = $this->product;
-                $result = $magentoService->createOrUpdateProduct($draft);
+                $result = $draft->vendor
+                    ? $draft->vendor->getMagentoService()->createOrUpdateProduct($draft)
+                    : $magentoService->createOrUpdateProduct($draft);
                 
-                if ($result['success']) {
+                if (! empty($result['id']) && ! empty($result['sku'])) {
                     // Update or create vendor product record
                     if ($draft->vendor_product_id) {
                         $vendorProduct = $draft->product;
                         $vendorProduct->update([
-                            'magento_product_id' => $result['product_id'],
+                            'magento_product_id' => $result['id'],
                             'magento_sku' => $result['sku'],
                             'sync_status' => 'synced',
                             'last_synced_at' => now(),
+                            'sync_errors' => null,
                         ]);
                     } else {
                         $vendorProduct = VendorProduct::create([
                             'vendor_id' => $draft->vendor_id,
                             'vendor_store_id' => $draft->vendor_store_id,
-                            'magento_product_id' => $result['product_id'],
+                            'magento_product_id' => $result['id'],
                             'magento_sku' => $result['sku'],
                             'sku' => $draft->sku,
                             'name' => $draft->name,
+                            'type_id' => $result['type_id'] ?? 'simple',
+                            'attribute_set_id' => $result['attribute_set_id'] ?? 4,
+                            'price' => $draft->price,
+                            'quantity' => $draft->quantity,
                             'status' => 'active',
                             'sync_status' => 'synced',
                             'last_synced_at' => now(),
+                            'metadata' => ['magento' => $result],
                         ]);
                         $draft->vendor_product_id = $vendorProduct->id;
+                        $draft->magento_product_id = $result['id'];
                         $draft->save();
                     }
                     
                     Log::info('Product synced to Magento', [
                         'draft_id' => $draft->id,
-                        'product_id' => $result['product_id'],
+                        'product_id' => $result['id'],
                         'sku' => $result['sku'],
                     ]);
                 } else {
-                    throw new \Exception($result['error'] ?? 'Failed to sync product to Magento');
+                    throw new \Exception('Failed to sync product to Magento');
                 }
             } else {
                 $vendorProduct = $this->product;
-                $result = $magentoService->updateProduct($vendorProduct);
+                $result = $vendorProduct->vendor
+                    ? $vendorProduct->vendor->getMagentoService()->createOrUpdateProduct($vendorProduct)
+                    : $magentoService->createOrUpdateProduct($vendorProduct);
                 
-                if ($result['success']) {
+                if (! empty($result['id']) && ! empty($result['sku'])) {
                     $vendorProduct->update([
+                        'magento_product_id' => $result['id'],
+                        'magento_sku' => $result['sku'],
                         'sync_status' => 'synced',
                         'last_synced_at' => now(),
+                        'sync_errors' => null,
                     ]);
                     
                     Log::info('Product updated in Magento', [
@@ -94,7 +108,7 @@ class SyncProductToMagento implements ShouldQueue
                         'sku' => $vendorProduct->sku,
                     ]);
                 } else {
-                    throw new \Exception($result['error'] ?? 'Failed to update product in Magento');
+                    throw new \Exception('Failed to update product in Magento');
                 }
             }
 

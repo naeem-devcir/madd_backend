@@ -61,6 +61,15 @@ class Vendor extends Model
         'total_reviews',
         'mlm_referrer_id',
         'magento_website_id',
+        'magento_base_url',
+        'magento_admin_pass',
+        'magento_access_token',
+        'magento_admin_token',
+        'magento_admin_username',
+        'magento_store_group_id',
+        'magento_root_category_id',
+        'magento_token_expires_at',
+        'magento_synced_at',
         'kyc_status',
         'verification_documents',
         'approved_by',
@@ -85,6 +94,14 @@ class Vendor extends Model
         'commission_override' => 'decimal:2',
         'rating_average' => 'decimal:2',
         'onboarding_step' => 'integer',
+        'magento_token_expires_at' => 'datetime',
+        'magento_synced_at'        => 'datetime',
+        'magento_store_group_id'   => 'integer',
+        'magento_root_category_id' => 'integer',
+
+        'magento_admin_pass'   => 'encrypted',
+        'magento_access_token' => 'encrypted',
+        'magento_admin_token'  => 'encrypted',
     ];
 
 
@@ -203,6 +220,36 @@ class Vendor extends Model
     {
         return $this->belongsTo(User::class, 'mlm_referrer_id');
     }
+
+
+
+    public function hasMagentoToken(): bool
+    {
+        return !empty($this->magento_admin_token);
+    }
+
+    public function hasMagentoCredentials(): bool
+    {
+        return !empty($this->magento_base_url)
+            && (
+                !empty($this->magento_access_token)
+                || (!empty($this->magento_admin_username) && !empty($this->magento_admin_pass))
+            );
+    }
+
+    public function isMagentoTokenValid(): bool
+    {
+        return !empty($this->magento_admin_token)
+            && $this->magento_token_expires_at
+            && $this->magento_token_expires_at->isFuture();
+    }
+
+    public function getMagentoService(): \App\Services\Integration\MagentoService
+    {
+        return new \App\Services\Integration\MagentoService($this);
+    }
+
+
 
     public function canAddStore()
     {

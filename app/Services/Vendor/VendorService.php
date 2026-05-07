@@ -10,6 +10,7 @@ use App\Models\Config\SalesPolicy;
 use App\Models\Config\Domain;
 use App\Models\Order\Order;
 use App\Services\Integration\MagentoService;
+use App\Services\Store\AdminStoreService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -17,10 +18,12 @@ use Illuminate\Support\Str;
 class VendorService
 {
     protected $magentoService;
+    protected AdminStoreService $adminStoreService;
 
-    public function __construct(MagentoService $magentoService)
+    public function __construct(MagentoService $magentoService, AdminStoreService $adminStoreService)
     {
         $this->magentoService = $magentoService;
+        $this->adminStoreService = $adminStoreService;
     }
 
     /**
@@ -89,47 +92,15 @@ class VendorService
      */
     public function createStore(Vendor $vendor, array $data): VendorStore
     {
-        // Check plan limits
         if (!$vendor->canAddStore()) {
             throw new \Exception('Store limit reached for your plan');
         }
 
-        // Generate unique slug
-        $slug = Str::slug($data['store_name']);
-        $originalSlug = $slug;
-        $counter = 1;
-
-        // ✅ FIXED - Integer ID use karo
-        while (VendorStore::where('vendor_id', $vendor->id)->where('store_slug', $slug)->exists()) {
-            $slug = $originalSlug . '-' . $counter;
-            $counter++;
-        }
-
-        // Create store
-        $store = VendorStore::create([
-            'vendor_id' => $vendor->id,  // ✅ FIXED - Integer ID
-            'store_name' => $data['store_name'],
-            'store_slug' => $slug,
-            'country_code' => $data['country_code'],
-            'currency_code' => $data['currency_code'] ?? 'EUR',
-            'language_code' => $data['language_code'] ?? 'en',
-            'subdomain' => $data['subdomain'] ?? null,
-            'status' => 'inactive',
-        ]);
-
-        // Create subdomain if requested
-        if ($data['subdomain'] ?? false) {
-            $this->createSubdomain($store, $data['subdomain']);
-        }
-
-        // Create Magento store view
-        $magentoData = $this->magentoService->createStoreView($vendor, $store);
-        $store->update([
-            'magento_store_id' => $magentoData['store_id'],
-            'magento_store_group_id' => $magentoData['store_group_id'],
-        ]);
-
-        return $store;
+        return $this->adminStoreService->create(array_merge($data, [
+            'vendor_id' => $vendor->id,
+            'store_slug' => $data['store_slug'] ?? Str::slug($data['store_name']),
+            'status' => $data['status'] ?? 'inactive',
+        ]));
     }
 
     /**

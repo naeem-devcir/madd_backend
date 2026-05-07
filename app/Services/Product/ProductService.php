@@ -6,6 +6,7 @@ use App\Models\Product\ProductDraft;
 use App\Models\Product\ProductApproval;
 use App\Models\Product\VendorProduct;
 use App\Models\Vendor\Vendor;
+use App\Models\Vendor\VendorStore;
 use App\Services\Integration\MagentoService;
 use Illuminate\Support\Facades\DB;
 
@@ -42,19 +43,22 @@ class ProductService
     /**
      * Approve product draft and sync to Magento
      */
-    public function approveProduct(ProductDraft $draft, string $adminId): void
+    public function approveProduct(ProductDraft $draft, int $adminId, ?string $notes = null): VendorProduct
     {
         DB::beginTransaction();
 
         try {
+            $draft->loadMissing('vendor', 'store', 'product');
+
             // Update draft status
             $draft->status = 'approved';
             $draft->reviewed_by = $adminId;
             $draft->reviewed_at = now();
+            $draft->review_notes = $notes;
             $draft->save();
 
             // Sync to Magento
-            $magentoProduct = $this->magentoService->createOrUpdateProduct($draft);
+            $magentoProduct = $this->magentoForVendor($draft->vendor)->createOrUpdateProduct($draft);
 
             // Create or update vendor product record
             if ($draft->vendor_product_id) {
@@ -64,9 +68,13 @@ class ProductService
                     'magento_sku' => $magentoProduct['sku'],
                     'sku' => $draft->sku,
                     'name' => $draft->name,
+                    'price' => $draft->price,
+                    'quantity' => $draft->quantity,
                     'status' => 'active',
                     'sync_status' => 'synced',
                     'last_synced_at' => now(),
+                    'sync_errors' => null,
+                    'metadata' => $this->mergedMetadata($product, $magentoProduct),
                 ]);
             } else {
                 $product = VendorProduct::create([
@@ -76,21 +84,35 @@ class ProductService
                     'magento_sku' => $magentoProduct['sku'],
                     'sku' => $draft->sku,
                     'name' => $draft->name,
+                    'type_id' => $magentoProduct['type_id'] ?? 'simple',
+                    'attribute_set_id' => $magentoProduct['attribute_set_id'] ?? 4,
+                    'price' => $draft->price,
+                    'quantity' => $draft->quantity,
                     'status' => 'active',
                     'sync_status' => 'synced',
                     'last_synced_at' => now(),
+                    'metadata' => [
+                        'magento' => $magentoProduct,
+                        'created_by_admin_id' => $adminId,
+                    ],
                 ]);
                 
                 $draft->vendor_product_id = $product->id;
-                $draft->save();
             }
+
+            // $draft->magento_product_id = $magentoProduct['id'];
+            $draft->published_at = now();
+            $draft->save();
 
             // Update approval record
             $approval = ProductApproval::where('product_draft_id', $draft->id)->first();
-            $approval->status = 'approved';
-            $approval->reviewed_by = $adminId;
-            $approval->reviewed_at = now();
-            $approval->save();
+            if ($approval) {
+                $approval->status = 'approved';
+                $approval->reviewed_by = $adminId;
+                $approval->reviewed_at = now();
+                $approval->admin_notes = $notes;
+                $approval->save();
+            }
 
             DB::commit();
 
@@ -99,6 +121,8 @@ class ProductService
 
             // Notify vendor
             \App\Jobs\Notification\SendProductApprovedNotification::dispatch($product);
+
+            return $product;
 
         } catch (\Exception $e) {
             DB::rollBack();
@@ -109,7 +133,7 @@ class ProductService
     /**
      * Reject product draft
      */
-    public function rejectProduct(ProductDraft $draft, string $adminId, string $reason): void
+    public function rejectProduct(ProductDraft $draft, int $adminId, string $reason): void
     {
         DB::beginTransaction();
 
@@ -141,7 +165,7 @@ class ProductService
     /**
      * Request modification for product draft
      */
-    public function requestModification(ProductDraft $draft, string $adminId, string $notes): void
+    public function requestModification(ProductDraft $draft, int $adminId, string $notes): void
     {
         DB::beginTransaction();
 
@@ -204,5 +228,177 @@ class ProductService
             'images' => 'nullable|array|max:10',
             'images.*' => 'image|max:5120', // 5MB per image
         ];
+    }
+
+    public function createAdminProduct(array $data, int $adminId): VendorProduct
+    {
+        $vendor = Vendor::findOrFail($data['vendor_id']);
+        $store = VendorStore::where('vendor_id', $vendor->getKey())->findOrFail($data['vendor_store_id']);
+
+        $draft = new ProductDraft([
+            'vendor_id' => $vendor->getKey(),
+            'vendor_store_id' => $store->id,
+            'sku' => $data['sku'],
+            'name' => $data['name'],
+            'description' => $data['description'] ?? null,
+            'short_description' => $data['short_description'] ?? null,
+            'price' => $data['price'],
+            'special_price' => $data['special_price'] ?? null,
+            'special_price_from' => $data['special_price_from'] ?? null,
+            'special_price_to' => $data['special_price_to'] ?? null,
+            'quantity' => $data['quantity'] ?? 0,
+            'weight' => $data['weight'] ?? 0,
+            'product_data' => $data,
+            'media_gallery' => $data['media_gallery'] ?? null,
+            'categories' => $data['categories'] ?? null,
+            'attributes' => $data['attributes'] ?? null,
+            'seo_data' => $data['seo_data'] ?? null,
+            'status' => 'approved',
+            'reviewed_by' => $adminId,
+            'reviewed_at' => now(),
+            'published_at' => now(),
+        ]);
+
+        $draft->setRelation('vendor', $vendor);
+        $draft->setRelation('store', $store);
+
+        $magentoProduct = $this->magentoForVendor($vendor)->createOrUpdateProduct($draft);
+
+        return DB::transaction(function () use ($draft, $magentoProduct, $adminId, $data) {
+            $product = VendorProduct::create([
+                'vendor_id' => $draft->vendor_id,
+                'vendor_store_id' => $draft->vendor_store_id,
+                'magento_product_id' => $magentoProduct['id'],
+                'magento_sku' => $magentoProduct['sku'],
+                'sku' => $draft->sku,
+                'name' => $draft->name,
+                'type_id' => $magentoProduct['type_id'] ?? 'simple',
+                'attribute_set_id' => $magentoProduct['attribute_set_id'] ?? 4,
+                'price' => $draft->price,
+                'quantity' => $draft->quantity,
+                'status' => $data['status'] ?? 'active',
+                'sync_status' => 'synced',
+                'last_synced_at' => now(),
+                'metadata' => [
+                    'magento' => $magentoProduct,
+                    'created_by_admin_id' => $adminId,
+                ],
+            ]);
+
+            $draft->vendor_product_id = $product->id;
+            // $draft->magento_product_id = $magentoProduct['id'];
+            $draft->save();
+
+            return $product;
+        });
+    }
+
+    public function updateAdminProduct(VendorProduct $product, array $data, int $adminId): VendorProduct
+    {
+        $product->loadMissing('vendor', 'store');
+
+        $draft = new ProductDraft([
+            'vendor_id' => $product->vendor_id,
+            'vendor_store_id' => $product->vendor_store_id,
+            'vendor_product_id' => $product->id,
+            'sku' => $data['sku'] ?? $product->sku,
+            'name' => $data['name'] ?? $product->name,
+            'description' => $data['description'] ?? $product->draft?->description,
+            'short_description' => $data['short_description'] ?? $product->draft?->short_description,
+            'price' => $data['price'] ?? $product->price,
+            'quantity' => $data['quantity'] ?? $product->quantity,
+            'weight' => $data['weight'] ?? $product->draft?->weight ?? 0,
+            'product_data' => $data,
+            'media_gallery' => $data['media_gallery'] ?? $product->draft?->media_gallery,
+            'categories' => $data['categories'] ?? $product->draft?->categories,
+            'attributes' => $data['attributes'] ?? $product->draft?->attributes,
+            'seo_data' => $data['seo_data'] ?? $product->draft?->seo_data,
+            'status' => 'approved',
+            // 'magento_product_id' => $product->magento_product_id,
+            'reviewed_by' => $adminId,
+            'reviewed_at' => now(),
+            'published_at' => now(),
+        ]);
+
+        // $draft->magento_sku = $product->magento_sku;
+        $draft->setRelation('vendor', $product->vendor);
+        $draft->setRelation('store', $product->store);
+        $draft->setRelation('product', $product);
+
+        $magentoProduct = $this->magentoForVendor($product->vendor)->createOrUpdateProduct($draft);
+
+        return DB::transaction(function () use ($product, $draft, $magentoProduct, $adminId, $data) {
+            $product->update([
+                'magento_product_id' => $magentoProduct['id'] ?? $product->magento_product_id,
+                'magento_sku' => $magentoProduct['sku'] ?? $draft->sku,
+                'sku' => $draft->sku,
+                'name' => $draft->name,
+                'type_id' => $magentoProduct['type_id'] ?? $product->type_id,
+                'attribute_set_id' => $magentoProduct['attribute_set_id'] ?? $product->attribute_set_id,
+                'price' => $draft->price,
+                'quantity' => $draft->quantity,
+                'status' => $data['status'] ?? $product->status,
+                'sync_status' => 'synced',
+                'last_synced_at' => now(),
+                'sync_errors' => null,
+                'metadata' => $this->mergedMetadata($product, $magentoProduct, ['updated_by_admin_id' => $adminId]),
+            ]);
+
+            $draft->vendor_product_id = $product->id;
+            // $draft->magento_product_id = $product->magento_product_id;
+            $draft->save();
+
+            return $product->refresh();
+        });
+    }
+
+    public function deleteAdminProduct(VendorProduct $product, int $adminId): array
+    {
+        $product->loadMissing('vendor');
+
+        if ($product->orderItems()->exists()) {
+            return [
+                'deleted' => false,
+                'blocked' => true,
+                'reason' => 'Cannot delete product with existing orders',
+                'order_count' => $product->orderItems()->count(),
+            ];
+        }
+
+        $magentoResult = $this->magentoForVendor($product->vendor)->deleteProduct($product->magento_sku ?: $product->sku);
+
+        DB::transaction(function () use ($product, $adminId, $magentoResult) {
+            $product->update([
+                'status' => 'deleted',
+                'sync_status' => 'deleted',
+                'last_synced_at' => now(),
+                'sync_errors' => null,
+                'metadata' => $this->mergedMetadata($product, $magentoResult, [
+                    'deleted_by_admin_id' => $adminId,
+                    'deleted_at' => now()->toIso8601String(),
+                ]),
+            ]);
+
+            $product->delete();
+        });
+
+        return [
+            'deleted' => true,
+            'blocked' => false,
+            'magento' => $magentoResult,
+        ];
+    }
+
+    private function magentoForVendor(Vendor $vendor): MagentoService
+    {
+        return new MagentoService($vendor);
+    }
+
+    private function mergedMetadata(?VendorProduct $product, array $magentoProduct, array $extra = []): array
+    {
+        return array_merge($product?->metadata ?? [], $extra, [
+            'magento' => $magentoProduct,
+            'magento_synced_at' => now()->toIso8601String(),
+        ]);
     }
 }

@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvider;
+use App\Services\Integration\MagentoService;
 
 class EventServiceProvider extends ServiceProvider
 {
@@ -24,27 +25,37 @@ class EventServiceProvider extends ServiceProvider
         ],
         
         // Product Events
-        \App\Events\Product\ProductCreated::class => [
-            \App\Listeners\Product\SyncProductToMagento::class,
-            \App\Listeners\Product\NotifyVendorProductCreated::class,
-        ],
+        // \App\Events\Product\ProductCreated::class => [
+        //     \App\Listeners\Product\SyncProductToMagento::class,
+        //     \App\Listeners\Product\NotifyVendorProductCreated::class,
+        // ],
         
-        \App\Events\Product\ProductApproved::class => [
-            \App\Listeners\Product\PublishProductToStores::class,
-            \App\Listeners\Product\NotifyVendorProductApproved::class,
-        ],
+        // \App\Events\Product\ProductApproved::class => [
+        //     \App\Listeners\Product\PublishProductToStores::class,
+        //     \App\Listeners\Product\NotifyVendorProductApproved::class,
+        // ],
         
         // Settlement Events
-        \App\Events\Settlement\SettlementGenerated::class => [
-            \App\Listeners\Settlement\GenerateSettlementStatement::class,
-            \App\Listeners\Settlement\NotifyVendorSettlementReady::class,
-        ],
+        // \App\Events\Settlement\SettlementGenerated::class => [
+        //     \App\Listeners\Settlement\GenerateSettlementStatement::class,
+        //     \App\Listeners\Settlement\NotifyVendorSettlementReady::class,
+        // ],
         
-        \App\Events\Settlement\SettlementPaid::class => [
-            \App\Listeners\Settlement\UpdateVendorBalance::class,
-            \App\Listeners\Settlement\SendPayoutConfirmation::class,
-        ],
+        // \App\Events\Settlement\SettlementPaid::class => [
+        //     \App\Listeners\Settlement\UpdateVendorBalance::class,
+        //     \App\Listeners\Settlement\SendPayoutConfirmation::class,
+        // ],
     ];
+
+    /**
+     * Register any application services.
+     */
+    public function register(): void
+    {
+        $this->app->bind(MagentoService::class, function ($app) {
+            return new MagentoService();
+        });
+    }
 
     /**
      * Register any events for your application.

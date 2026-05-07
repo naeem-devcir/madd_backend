@@ -18,6 +18,31 @@ use Illuminate\Support\Facades\Route;
 // ============================================
 // API Version prefix
 // ============================================
+
+
+Route::get('/test-set-vendor-credentials', function () {
+
+    $vendor = \App\Models\Vendor\Vendor::first();
+
+    $vendor->update([
+        'magento_base_url'     => 'http://dev.magento22.local',
+        'magento_admin_username'   => 'admin',
+        'magento_admin_pass'   => 'Admin@12345',
+        'magento_access_token' => 'v4g69aqyi6o9eqc4aw17q6fwqkka0ihi',
+    ]);
+
+    return response()->json([
+        'status' => 'Credentials saved',
+        'vendor' => $vendor->only([
+            'id',
+            'company_name',
+            'magento_base_url',
+            'magento_admin_user',
+        ]),
+    ]);
+});
+
+
 Route::prefix('v1')->group(function () {
 
     // ============================================
@@ -350,7 +375,6 @@ Route::prefix('v1')->group(function () {
         Route::get('statistics', [Api\Admin\AdminDashboardController::class, 'statistics']);
 
         // User Management
-        // user module compleate bhai like only jo reson ki bachodi hy us ka pata krna hy
         Route::prefix('users')->group(function () {
             Route::get('/', [Api\Admin\AdminUserController::class, 'index']);
             Route::post('/', [Api\Admin\AdminVendorController::class, 'store']);
@@ -372,6 +396,8 @@ Route::prefix('v1')->group(function () {
             Route::get('statistics', [Api\Admin\AdminVendorController::class, 'statistics']);
             Route::get('applications', [Api\Admin\AdminVendorController::class, 'applications']);
             Route::get('{id}', [Api\Admin\AdminVendorController::class, 'show']);
+            Route::put('{id}', [Api\Admin\AdminVendorController::class, 'update']);
+            Route::delete('{id}', [Api\Admin\AdminVendorController::class, 'destroy']);
             Route::post('{id}/approve', [Api\Admin\AdminVendorController::class, 'approve']);
             Route::post('{id}/suspend', [Api\Admin\AdminVendorController::class, 'suspend']);
             Route::post('{id}/activate', [Api\Admin\AdminVendorController::class, 'activate']);
@@ -379,36 +405,97 @@ Route::prefix('v1')->group(function () {
             Route::post('{id}/kyc-verify', [Api\Admin\AdminVendorController::class, 'verifyKyc']);
             Route::post('{id}/kyc-reject', [Api\Admin\AdminVendorController::class, 'rejectKyc']);
         });
+        
         // Store Management
         Route::prefix('stores')->group(function () {
-            Route::get('/', [Api\Admin\AdminStoreController::class, 'index']);
-            Route::post('/', [Api\Admin\AdminStoreController::class, 'store']); // ADDED: Create store
-            Route::get('by-vendor/{vendorId}', [Api\Admin\AdminStoreController::class, 'getStoresByVendor']); // ADDED: Get stores by vendor
-            Route::post('bulk-status', [Api\Admin\AdminStoreController::class, 'bulkStatusUpdate']); // ADDED: Bulk status update
-            Route::get('{uuid}', [Api\Admin\AdminStoreController::class, 'show']);
-            Route::put('{id}', [Api\Admin\AdminStoreController::class, 'update']);
-            Route::delete('{id}', [Api\Admin\AdminStoreController::class, 'destroy']);
-            Route::delete('{id}/force', [Api\Admin\AdminStoreController::class, 'forceDelete']); // ADDED: Force delete
-            Route::post('{id}/restore', [Api\Admin\AdminStoreController::class, 'restore']); // ADDED: Restore soft-deleted
-            Route::post('{id}/activate', [Api\Admin\AdminStoreController::class, 'activate']);
-            Route::post('{id}/deactivate', [Api\Admin\AdminStoreController::class, 'deactivate']);
-            Route::post('{id}/domain', [Api\Admin\AdminStoreController::class, 'addDomain']);
-            Route::get('{id}/stats', [Api\Admin\AdminStoreController::class, 'stats']);
+
+            // ── Collection ────────────────────────────────────────────────────────────
+            Route::get('/',             [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'index']);
+            Route::post('/',            [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'store']);
+
+            // ── Vendor-scoped listing ─────────────────────────────────────────────────
+            Route::get('by-vendor/{vendorId}', [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'getStoresByVendor']);
+
+            // ── Bulk ──────────────────────────────────────────────────────────────────
+            // Body: { "store_ids": [1,2,3], "status": "active" }  ← internal IDs ok for bulk
+            Route::post('bulk-status',  [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'bulkStatusUpdate']);
+
+            // ── Single resource (all use UUID) ────────────────────────────────────────
+            Route::get('{uuid}',            [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'show']);
+            Route::put('{uuid}',            [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'update']);
+            Route::delete('{uuid}',         [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'destroy']);
+            Route::delete('{uuid}/force',   [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'forceDelete']);
+            Route::post('{uuid}/restore',   [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'restore']);
+            Route::post('{uuid}/activate',  [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'activate']);
+            Route::post('{uuid}/deactivate', [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'deactivate']);
+            Route::post('{uuid}/domain',    [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'addDomain']);
+            Route::get('{uuid}/stats',      [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'stats']);
         });
 
         // Product Management
+        // Route::prefix('products')->group(function () {
+        //     Route::get('/', [Api\Admin\AdminProductController::class, 'index']);
+        //     Route::post('/', [Api\Admin\AdminProductController::class, 'store']);
+        //     Route::get('statistics', [Api\Admin\AdminProductController::class, 'statistics']);
+        //     Route::get('pending', [Api\Admin\AdminProductController::class, 'pending']);
+        //     Route::get('vendor/{vendorId}', [Api\Admin\AdminProductController::class, 'vendorIndex']);
+        //     Route::post('vendor/{vendorId}', [Api\Admin\AdminProductController::class, 'storeForVendor']);
+        //     Route::get('vendor/{vendorId}/{uuid}', [Api\Admin\AdminProductController::class, 'showForVendor']);
+        //     Route::put('vendor/{vendorId}/{uuid}', [Api\Admin\AdminProductController::class, 'updateForVendor']);
+        //     Route::delete('vendor/{vendorId}/{uuid}', [Api\Admin\AdminProductController::class, 'destroyForVendor']);
+        //     Route::get('{id}', [Api\Admin\AdminProductController::class, 'show']);
+        //     Route::put('{id}', [Api\Admin\AdminProductController::class, 'update']);
+        //     Route::post('drafts/{id}/approve', [Api\Admin\AdminProductController::class, 'approve']);
+        //     Route::post('drafts/{id}/reject', [Api\Admin\AdminProductController::class, 'reject']);
+        //     Route::post('drafts/{id}/request-modification', [Api\Admin\AdminProductController::class, 'requestModification']);
+        //     Route::delete('{id}', [Api\Admin\AdminProductController::class, 'destroy']);
+        //     Route::post('{id}/feature', [Api\Admin\AdminProductController::class, 'feature']);
+        //     Route::post('{id}/unfeature', [Api\Admin\AdminProductController::class, 'unfeature']);
+        // });
+
+
+
+
+
+
         Route::prefix('products')->group(function () {
-            Route::get('/', [Api\Admin\AdminProductController::class, 'index']);
+
+            // ── Statistics ────────────────────────────────────────────────────────────
             Route::get('statistics', [Api\Admin\AdminProductController::class, 'statistics']);
-            Route::get('pending', [Api\Admin\AdminProductController::class, 'pending']);
-            Route::get('{id}', [Api\Admin\AdminProductController::class, 'show']);
-            Route::post('drafts/{id}/approve', [Api\Admin\AdminProductController::class, 'approve']);
-            Route::post('drafts/{id}/reject', [Api\Admin\AdminProductController::class, 'reject']);
-            Route::post('drafts/{id}/request-modification', [Api\Admin\AdminProductController::class, 'requestModification']);
-            Route::delete('{id}', [Api\Admin\AdminProductController::class, 'destroy']);
-            Route::post('{id}/feature', [Api\Admin\AdminProductController::class, 'feature']);
-            Route::post('{id}/unfeature', [Api\Admin\AdminProductController::class, 'unfeature']);
+
+            // ── Draft approval workflow ───────────────────────────────────────────────
+            Route::prefix('drafts')->group(function () {
+                Route::get('pending',                   [Api\Admin\AdminProductController::class, 'pending']);
+                Route::post('{id}/approve',             [Api\Admin\AdminProductController::class, 'approve']);
+                Route::post('{id}/reject',              [Api\Admin\AdminProductController::class, 'reject']);
+                Route::post('{id}/request-modification', [Api\Admin\AdminProductController::class, 'requestModification']);
+                Route::post('bulk-approve',             [Api\Admin\AdminProductController::class, 'bulkApprove']);
+            });
+
+            // ── Global product CRUD (all vendors) ────────────────────────────────────
+            Route::get('/',           [Api\Admin\AdminProductController::class, 'index']);
+            Route::post('/',          [Api\Admin\AdminProductController::class, 'store']);
+            Route::get('{uuid}',      [Api\Admin\AdminProductController::class, 'show']);
+            Route::put('{uuid}',      [Api\Admin\AdminProductController::class, 'update']);
+            Route::delete('{uuid}',   [Api\Admin\AdminProductController::class, 'destroy']);
+            Route::post('{uuid}/feature',   [Api\Admin\AdminProductController::class, 'feature']);
+            Route::post('{uuid}/unfeature', [Api\Admin\AdminProductController::class, 'unfeature']);
         });
+
+        // ── Vendor-scoped product CRUD ────────────────────────────────────────────────
+        Route::prefix('vendors/{vendorId}/products')->group(function () {
+            Route::get('statistics',  [Api\Admin\AdminProductController::class, 'statistics']);
+            Route::get('/',           [Api\Admin\AdminProductController::class, 'index']);
+            Route::post('/',          [Api\Admin\AdminProductController::class, 'store']);
+            Route::get('{uuid}',      [Api\Admin\AdminProductController::class, 'show']);
+            Route::put('{uuid}',      [Api\Admin\AdminProductController::class, 'update']);
+            Route::delete('{uuid}',   [Api\Admin\AdminProductController::class, 'destroy']);
+        });
+
+
+
+
+
 
         // Order Management
         Route::prefix('orders')->group(function () {
