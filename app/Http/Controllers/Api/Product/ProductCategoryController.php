@@ -5,291 +5,284 @@ namespace App\Http\Controllers\Api\Product;
 use App\Http\Controllers\Controller;
 use App\Models\Vendor\VendorStore;
 use App\Services\Product\CategoryService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Throwable;
 
 class ProductCategoryController extends Controller
 {
-    protected $categoryService;
+    public function __construct(protected CategoryService $categoryService) {}
 
-    public function __construct(CategoryService $categoryService)
-    {
-        $this->categoryService = $categoryService;
-    }
-
-    /**
-     * Get all categories for a store
-     */
-    public function index(Request $request)
-    {
-        $request->validate([
-            'store_id' => 'required|exists:vendor_stores,id',
-            'parent_id' => 'nullable|integer',
-            'include_products_count' => 'boolean',
-        ]);
-
-        $store = VendorStore::findOrFail($request->store_id);
-
-        // Cache categories for better performance
-        $cacheKey = "store_categories_{$store->id}_".($request->parent_id ?? 'root');
-
-        $categories = Cache::remember($cacheKey, 3600, function () use ($store, $request) {
-            return $this->categoryService->getCategories(
-                $store->magento_store_id,
-                $request->parent_id,
-                $request->boolean('include_products_count', false)
-            );
-        });
-
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'store' => [
-                    'id' => $store->id,
-                    'name' => $store->store_name,
-                    'slug' => $store->store_slug,
-                ],
-                'categories' => $categories,
-                'total' => count($categories),
-            ],
-        ]);
-    }
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
 
     /**
-     * Get single category by slug
+     * storeSlug se active store lo + vendor eager load (credentials ke liye)
      */
-    public function show(Request $request, $slug)
+    private function resolveStore(string $storeSlug): VendorStore
     {
-        $request->validate([
-            'store_id' => 'required|exists:vendor_stores,id',
-            'per_page' => 'nullable|integer|min:1|max:100',
-            'sort_by' => 'nullable|in:newest,price_asc,price_desc,popular',
-        ]);
-
-        $store = VendorStore::where('id', $request->store_id)
+        return VendorStore::with('vendor')      // credentials yahan hain
+            ->where('store_slug', $storeSlug)
             ->where('status', 'active')
             ->firstOrFail();
-
-        $cacheKey = "store_category_{$store->id}_{$slug}";
-
-        $category = Cache::remember($cacheKey, 3600, function () use ($store, $slug) {
-            return $this->categoryService->getCategoryBySlug(
-                $store->magento_store_id,
-                $slug
-            );
-        });
-
-        if (! $category) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Category not found',
-            ], 404);
-        }
-
-        // Get products in this category
-        $products = $this->categoryService->getCategoryProducts(
-            $store->magento_store_id,
-            $category['id'],
-            $request->input('per_page', 20),
-            $request->input('sort_by', 'newest')
-        );
-
-        // Get subcategories
-        $subcategories = $this->categoryService->getSubcategories(
-            $store->magento_store_id,
-            $category['id']
-        );
-
-        // Get breadcrumb trail
-        $breadcrumbs = $this->categoryService->getBreadcrumbs(
-            $store->magento_store_id,
-            $category['id']
-        );
-
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'store' => [
-                    'id' => $store->id,
-                    'name' => $store->store_name,
-                    'slug' => $store->store_slug,
-                ],
-                'category' => $category,
-                'breadcrumbs' => $breadcrumbs,
-                'subcategories' => $subcategories,
-                'products' => $products,
-                'filters' => $this->getAvailableFilters($store, $category['id']),
-            ],
-        ]);
     }
 
-    /**
-     * Get products by category slug
-     */
-    public function products(Request $request, $slug)
+    private function storeInfo(VendorStore $store): array
     {
-        $request->validate([
-            'store_id' => 'required|exists:vendor_stores,id',
-            'per_page' => 'nullable|integer|min:1|max:100',
-            'sort_by' => 'nullable|in:newest,price_asc,price_desc,popular',
-        ]);
-
-        $store = VendorStore::where('id', $request->store_id)
-            ->where('status', 'active')
-            ->firstOrFail();
-
-        $category = $this->categoryService->getCategoryBySlug(
-            $store->magento_store_id,
-            $slug
-        );
-
-        if (! $category) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Category not found',
-            ], 404);
-        }
-
-        $products = $this->categoryService->getCategoryProducts(
-            $store->magento_store_id,
-            $category['id'],
-            $request->input('per_page', 20),
-            $request->input('sort_by', 'newest')
-        );
-
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'store' => [
-                    'id' => $store->id,
-                    'name' => $store->store_name,
-                    'slug' => $store->store_slug,
-                ],
-                'category' => $category,
-                'products' => $products['items'],
-                'total' => $products['total'],
-            ],
-        ]);
-    }
-
-    /**
-     * Get category tree (hierarchical)
-     */
-    public function tree(Request $request)
-    {
-        $request->validate([
-            'store_id' => 'required|exists:vendor_stores,id',
-            'max_depth' => 'nullable|integer|min:1|max:10',
-        ]);
-
-        $store = VendorStore::findOrFail($request->store_id);
-
-        $depth = $request->max_depth ?? 5;
-        $cacheKey = "store_category_tree_{$store->id}_depth_{$depth}";
-
-        $tree = Cache::remember($cacheKey, 3600, function () use ($store, $request) {
-            return $this->categoryService->getCategoryTree(
-                $store->magento_store_id,
-                $request->max_depth ?? 5
-            );
-        });
-
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'store' => [
-                    'id' => $store->id,
-                    'name' => $store->store_name,
-                ],
-                'tree' => $tree,
-            ],
-        ]);
-    }
-
-    /**
-     * Get featured categories for homepage
-     */
-    public function featured(Request $request)
-    {
-        $request->validate([
-            'store_id' => 'required|exists:vendor_stores,id',
-            'limit' => 'nullable|integer|min:1|max:20',
-        ]);
-
-        $store = VendorStore::findOrFail($request->store_id);
-
-        $cacheKey = "store_featured_categories_{$store->id}";
-
-        $featured = Cache::remember($cacheKey, 7200, function () use ($store, $request) {
-            return $this->categoryService->getFeaturedCategories(
-                $store->magento_store_id,
-                $request->limit ?? 8
-            );
-        });
-
-        return response()->json([
-            'success' => true,
-            'data' => $featured,
-        ]);
-    }
-
-    /**
-     * Get available filters for category
-     */
-    private function getAvailableFilters($store, $categoryId): array
-    {
-        // This would typically come from Magento layered navigation
         return [
-            'price' => [
-                'min' => 0,
-                'max' => 1000,
-                'step' => 10,
-            ],
-            'attributes' => [
-                [
-                    'name' => 'Size',
-                    'code' => 'size',
-                    'options' => ['S', 'M', 'L', 'XL'],
-                ],
-                [
-                    'name' => 'Color',
-                    'code' => 'color',
-                    'options' => ['Red', 'Blue', 'Green', 'Black', 'White'],
-                ],
-                [
-                    'name' => 'Brand',
-                    'code' => 'brand',
-                    'options' => ['Brand A', 'Brand B', 'Brand C'],
-                ],
-            ],
-            'rating' => [1, 2, 3, 4, 5],
-            'in_stock' => true,
+            'id'   => $store->id,
+            'name' => $store->store_name,
+            'slug' => $store->store_slug,
         ];
     }
 
-    /**
-     * Clear category cache (admin only)
-     */
-    public function clearCache(Request $request)
+    private function notFound(string $msg): JsonResponse
+    {
+        return response()->json(['success' => false, 'message' => $msg], 404);
+    }
+
+    private function serverError(string $msg, Throwable $e): JsonResponse
+    {
+        report($e);
+        return response()->json([
+            'success' => false,
+            'message' => $msg,
+            'error'   => config('app.debug') ? $e->getMessage() : 'Internal server error',
+        ], 500);
+    }
+
+    // -------------------------------------------------------------------------
+    // GET /catalog/{storeSlug}/categories
+    // -------------------------------------------------------------------------
+
+    public function index(Request $request, string $storeSlug): JsonResponse
     {
         $request->validate([
-            'store_id' => 'required|exists:vendor_stores,id',
+            'parent_id'             => 'nullable|integer',
+            'include_products_count' => 'boolean',
         ]);
 
-        $store = VendorStore::findOrFail($request->store_id);
+        try {
+            $store    = $this->resolveStore($storeSlug);
+            $parentId = $request->input('parent_id');  // null = root
 
-        // Clear all category caches for this store
-        Cache::forget("store_categories_{$store->id}_root");
-        Cache::forget("store_category_tree_{$store->id}_depth_5");
-        Cache::forget("store_featured_categories_{$store->id}");
+            $cacheKey = "store_categories_{$store->id}_" . ($parentId ?? 'root');
 
-        // Clear pattern-based cache
-        Cache::tags(["store_{$store->id}_categories"])->flush();
+            $categories = Cache::remember($cacheKey, 3600, function () use ($store, $request, $parentId) {
+                // CategoryService ko vendor pass karo — us se MagentoService credentials lega
+                return $this->categoryService->getCategories(
+                    $store->vendor,                 // ← vendor, not store_id
+                    $store->magento_store_id,
+                    $parentId,
+                    $request->boolean('include_products_count', false)
+                );
+            });
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Category cache cleared successfully',
+            return response()->json([
+                'success' => true,
+                'data'    => [
+                    'store'      => $this->storeInfo($store),
+                    'categories' => $categories,
+                    'total'      => count($categories),
+                ],
+            ]);
+
+        } catch (ModelNotFoundException) {
+            return $this->notFound('Store not found or inactive');
+        } catch (Throwable $e) {
+            return $this->serverError('Failed to fetch categories', $e);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // GET /catalog/{storeSlug}/categories/tree
+    // -------------------------------------------------------------------------
+
+    public function tree(Request $request, string $storeSlug): JsonResponse
+    {
+        $request->validate([
+            'max_depth' => 'nullable|integer|min:1|max:10',
         ]);
+
+        try {
+            $store = $this->resolveStore($storeSlug);
+            $depth = (int) $request->input('max_depth', 5);
+
+            $cacheKey = "store_category_tree_{$store->id}_depth_{$depth}";
+
+            $tree = Cache::remember($cacheKey, 3600, function () use ($store, $depth) {
+                return $this->categoryService->getCategoryTree(
+                    $store->vendor,
+                    $store->magento_store_id,
+                    $depth
+                );
+            });
+
+            return response()->json([
+                'success' => true,
+                'data'    => [
+                    'store' => $this->storeInfo($store),
+                    'tree'  => $tree,
+                ],
+            ]);
+
+        } catch (ModelNotFoundException) {
+            return $this->notFound('Store not found or inactive');
+        } catch (Throwable $e) {
+            return $this->serverError('Failed to fetch category tree', $e);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // GET /catalog/{storeSlug}/categories/featured
+    // -------------------------------------------------------------------------
+
+    public function featured(Request $request, string $storeSlug): JsonResponse
+    {
+        $request->validate([
+            'limit' => 'nullable|integer|min:1|max:20',
+        ]);
+
+        try {
+            $store = $this->resolveStore($storeSlug);
+            $limit = (int) $request->input('limit', 8);
+
+            $cacheKey = "store_featured_categories_{$store->id}_limit_{$limit}";
+
+            $featured = Cache::remember($cacheKey, 7200, function () use ($store, $limit) {
+                return $this->categoryService->getFeaturedCategories(
+                    $store->vendor,
+                    $store->magento_store_id,
+                    $limit
+                );
+            });
+
+            return response()->json([
+                'success' => true,
+                'data'    => [
+                    'store'      => $this->storeInfo($store),
+                    'categories' => $featured,
+                ],
+            ]);
+
+        } catch (ModelNotFoundException) {
+            return $this->notFound('Store not found or inactive');
+        } catch (Throwable $e) {
+            return $this->serverError('Failed to fetch featured categories', $e);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // GET /catalog/{storeSlug}/categories/{slug}
+    // -------------------------------------------------------------------------
+
+    public function show(Request $request, string $storeSlug, string $slug): JsonResponse
+    {
+        $request->validate([
+            'per_page' => 'nullable|integer|min:1|max:100',
+            'sort_by'  => 'nullable|in:newest,price_asc,price_desc,popular',
+        ]);
+
+        try {
+            $store = $this->resolveStore($storeSlug);
+
+            $cacheKey = "store_category_{$store->id}_{$slug}";
+
+            $category = Cache::remember($cacheKey, 3600, function () use ($store, $slug) {
+                return $this->categoryService->getCategoryBySlug(
+                    $store->vendor,
+                    $store->magento_store_id,
+                    $slug
+                );
+            });
+
+            if (! $category) {
+                return $this->notFound('Category not found');
+            }
+
+            // Products, subcategories, breadcrumbs — not cached (paginated/sorted)
+            $perPage = (int) $request->input('per_page', 20);
+            $sortBy  = $request->input('sort_by', 'newest');
+
+            [$products, $subcategories, $breadcrumbs] = [
+                $this->categoryService->getCategoryProducts(
+                    $store->vendor, $store->magento_store_id, $category['id'], $perPage, $sortBy
+                ),
+                $this->categoryService->getSubcategories(
+                    $store->vendor, $store->magento_store_id, $category['id']
+                ),
+                $this->categoryService->getBreadcrumbs(
+                    $store->vendor, $store->magento_store_id, $category['id']
+                ),
+            ];
+
+            return response()->json([
+                'success' => true,
+                'data'    => [
+                    'store'         => $this->storeInfo($store),
+                    'category'      => $category,
+                    'breadcrumbs'   => $breadcrumbs,
+                    'subcategories' => $subcategories,
+                    'products'      => $products,
+                ],
+            ]);
+
+        } catch (ModelNotFoundException) {
+            return $this->notFound('Store not found or inactive');
+        } catch (Throwable $e) {
+            return $this->serverError('Failed to fetch category', $e);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // GET /catalog/{storeSlug}/categories/{slug}/products
+    // -------------------------------------------------------------------------
+
+    public function products(Request $request, string $storeSlug, string $slug): JsonResponse
+    {
+        $request->validate([
+            'per_page' => 'nullable|integer|min:1|max:100',
+            'sort_by'  => 'nullable|in:newest,price_asc,price_desc,popular',
+        ]);
+
+        try {
+            $store = $this->resolveStore($storeSlug);
+
+            $category = $this->categoryService->getCategoryBySlug(
+                $store->vendor,
+                $store->magento_store_id,
+                $slug
+            );
+
+            if (! $category) {
+                return $this->notFound('Category not found');
+            }
+
+            $products = $this->categoryService->getCategoryProducts(
+                $store->vendor,
+                $store->magento_store_id,
+                $category['id'],
+                (int) $request->input('per_page', 20),
+                $request->input('sort_by', 'newest')
+            );
+
+            return response()->json([
+                'success' => true,
+                'data'    => [
+                    'store'    => $this->storeInfo($store),
+                    'category' => $category,
+                    'products' => $products['items'] ?? $products,
+                    'total'    => $products['total'] ?? count($products),
+                ],
+            ]);
+
+        } catch (ModelNotFoundException) {
+            return $this->notFound('Store not found or inactive');
+        } catch (Throwable $e) {
+            return $this->serverError('Failed to fetch category products', $e);
+        }
     }
 }
-

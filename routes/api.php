@@ -143,6 +143,17 @@ Route::prefix('v1')->group(function () {
         Route::get('categories/{slug}', [Api\Product\ProductCategoryController::class, 'show']);
         Route::get('categories/{slug}/products', [Api\Product\ProductCategoryController::class, 'products']);
 
+
+        // Routes — storeSlug URL
+        Route::prefix('catalog/{storeSlug}')->group(function () {
+            Route::get('categories',                    [Api\Product\ProductCategoryController::class, 'index']);
+            Route::get('categories/tree',               [Api\Product\ProductCategoryController::class, 'tree']);
+            Route::get('categories/featured',           [Api\Product\ProductCategoryController::class, 'featured']);
+            Route::get('categories/{slug}',             [Api\Product\ProductCategoryController::class, 'show']);
+            Route::get('categories/{slug}/products',    [Api\Product\ProductCategoryController::class, 'products']);
+        });
+
+
         // Search
         Route::get('search', [Api\Product\ProductSearchController::class, 'search']);
         Route::get('suggest', [Api\Product\ProductSearchController::class, 'suggest']);
@@ -405,7 +416,7 @@ Route::prefix('v1')->group(function () {
             Route::post('{id}/kyc-verify', [Api\Admin\AdminVendorController::class, 'verifyKyc']);
             Route::post('{id}/kyc-reject', [Api\Admin\AdminVendorController::class, 'rejectKyc']);
         });
-        
+
         // Store Management
         Route::prefix('stores')->group(function () {
 

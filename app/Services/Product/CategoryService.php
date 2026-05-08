@@ -2,357 +2,157 @@
 
 namespace App\Services\Product;
 
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
+use App\Models\Vendor\Vendor;
+use App\Services\Integration\MagentoService;
+use Illuminate\Support\Facades\Cache;
 
 class CategoryService
 {
-    protected $magentoBaseUrl;
-    protected $magentoToken;
-
-    public function __construct()
+    private function magento(Vendor $vendor): MagentoService
     {
-        $this->magentoBaseUrl = config('services.magento.base_url');
-        $this->magentoToken = config('services.magento.admin_token');
+        return new MagentoService($vendor); // vendor ke credentials use honge
     }
 
-    /**
-     * Get categories for a store
-     */
-    public function getCategories($storeId, $parentId = null, $includeCounts = false): array
+    public function getCategories(Vendor $vendor, ?int $magentoStoreId, ?int $parentId = null, bool $includeCount = false): array
     {
-        try {
-            $response = Http::withToken($this->magentoToken)
-                ->get($this->magentoBaseUrl . '/rest/V1/categories', [
-                    'searchCriteria' => [
-                        'filter_groups' => [
-                            [
-                                'filters' => [
-                                    [
-                                        'field' => 'parent_id',
-                                        'value' => $parentId ?? 0,
-                                        'condition_type' => 'eq',
-                                    ],
-                                    [
-                                        'field' => 'is_active',
-                                        'value' => 1,
-                                        'condition_type' => 'eq',
-                                    ],
-                                ],
-                            ],
-                        ],
-                    ],
-                ]);
+        $magento = $this->magento($vendor);
 
-            if ($response->successful()) {
-                $categories = $response->json()['items'] ?? [];
-                
-                if ($includeCounts) {
-                    foreach ($categories as &$category) {
-                        $category['product_count'] = $this->getCategoryProductCount($category['id']);
-                    }
-                }
-                
-                return $this->formatCategories($categories);
-            }
-
-            return $this->getFallbackCategories();
-
-        } catch (\Exception $e) {
-            Log::error('Category service error', ['error' => $e->getMessage()]);
-            return $this->getFallbackCategories();
+        $params = ['rootCategoryId' => $parentId ?? 1];
+        if ($magentoStoreId) {
+            $params['storeId'] = $magentoStoreId;
         }
+
+        $response = $magento->get('categories', $params);
+
+        return $this->flattenCategories($response['children_data'] ?? []);
     }
 
-    /**
-     * Get category by slug
-     */
-    public function getCategoryBySlug($storeId, $slug): ?array
+    public function getCategoryTree(Vendor $vendor, ?int $magentoStoreId, int $depth = 5): array
     {
-        try {
-            $response = Http::withToken($this->magentoToken)
-                ->get($this->magentoBaseUrl . '/rest/V1/categories', [
-                    'searchCriteria' => [
-                        'filter_groups' => [
-                            [
-                                'filters' => [
-                                    [
-                                        'field' => 'url_key',
-                                        'value' => $slug,
-                                        'condition_type' => 'eq',
-                                    ],
-                                ],
-                            ],
-                        ],
-                    ],
-                ]);
+        $magento  = $this->magento($vendor);
+        $params   = ['depth' => $depth];
 
-            if ($response->successful()) {
-                $categories = $response->json()['items'] ?? [];
-                if (!empty($categories)) {
-                    return $this->formatCategory($categories[0]);
-                }
-            }
-
-            return null;
-
-        } catch (\Exception $e) {
-            Log::error('Get category by slug error', ['error' => $e->getMessage()]);
-            return null;
+        if ($magentoStoreId) {
+            $params['storeId'] = $magentoStoreId;
         }
+
+        return $magento->get('categories', $params);
     }
 
-    /**
-     * Get category tree
-     */
-    public function getCategoryTree($storeId, $maxDepth = 5): array
+    public function getCategoryBySlug(Vendor $vendor, ?int $magentoStoreId, string $slug): ?array
     {
-        try {
-            $response = Http::withToken($this->magentoToken)
-                ->get($this->magentoBaseUrl . '/rest/V1/categories');
+        // Magento mein slug = url_key custom attribute
+        $magento  = $this->magento($vendor);
 
-            if ($response->successful()) {
-                $rootCategory = $response->json();
-                return $this->buildCategoryTree($rootCategory, $maxDepth);
-            }
+        $response = $magento->get('categories/list', [
+            'searchCriteria[filterGroups][0][filters][0][field]'          => 'url_key',
+            'searchCriteria[filterGroups][0][filters][0][value]'          => $slug,
+            'searchCriteria[filterGroups][0][filters][0][conditionType]'  => 'eq',
+            'searchCriteria[pageSize]'                                    => 1,
+        ]);
 
-            return [];
-
-        } catch (\Exception $e) {
-            Log::error('Get category tree error', ['error' => $e->getMessage()]);
-            return [];
-        }
+        return $response['items'][0] ?? null;
     }
 
-    /**
-     * Get category products
-     */
-    public function getCategoryProducts($storeId, $categoryId, $perPage = 20, $sortBy = 'newest')
+    public function getCategoryProducts(Vendor $vendor, ?int $magentoStoreId, int $categoryId, int $perPage = 20, string $sortBy = 'newest'): array
     {
-        try {
-            $sortMap = [
-                'newest' => ['field' => 'created_at', 'direction' => 'DESC'],
-                'price_asc' => ['field' => 'price', 'direction' => 'ASC'],
-                'price_desc' => ['field' => 'price', 'direction' => 'DESC'],
-                'popular' => ['field' => 'sales', 'direction' => 'DESC'],
-            ];
+        $magento = $this->magento($vendor);
 
-            $response = Http::withToken($this->magentoToken)
-                ->get($this->magentoBaseUrl . '/rest/V1/products', [
-                    'searchCriteria' => [
-                        'filter_groups' => [
-                            [
-                                'filters' => [
-                                    [
-                                        'field' => 'category_id',
-                                        'value' => $categoryId,
-                                        'condition_type' => 'eq',
-                                    ],
-                                ],
-                            ],
-                        ],
-                        'sort_orders' => [$sortMap[$sortBy] ?? $sortMap['newest']],
-                        'page_size' => $perPage,
-                    ],
-                ]);
+        [$sortField, $sortDir] = match ($sortBy) {
+            'price_asc'  => ['price', 'ASC'],
+            'price_desc' => ['price', 'DESC'],
+            'popular'    => ['sold_qty', 'DESC'],
+            default      => ['created_at', 'DESC'],  // newest
+        };
 
-            if ($response->successful()) {
-                $data = $response->json();
-                return [
-                    'items' => $data['items'] ?? [],
-                    'total' => $data['total_count'] ?? 0,
-                ];
-            }
+        $response = $magento->get('products', [
+            'searchCriteria[filterGroups][0][filters][0][field]'         => 'category_id',
+            'searchCriteria[filterGroups][0][filters][0][value]'         => $categoryId,
+            'searchCriteria[filterGroups][0][filters][0][conditionType]' => 'eq',
+            'searchCriteria[sortOrders][0][field]'                       => $sortField,
+            'searchCriteria[sortOrders][0][direction]'                   => $sortDir,
+            'searchCriteria[pageSize]'                                   => $perPage,
+            'searchCriteria[currentPage]'                                => 1,
+        ]);
 
-            return ['items' => [], 'total' => 0];
-
-        } catch (\Exception $e) {
-            Log::error('Get category products error', ['error' => $e->getMessage()]);
-            return ['items' => [], 'total' => 0];
-        }
+        return [
+            'items' => $response['items'] ?? [],
+            'total' => $response['total_count'] ?? 0,
+        ];
     }
 
-    /**
-     * Get subcategories
-     */
-    public function getSubcategories($storeId, $categoryId): array
+    public function getSubcategories(Vendor $vendor, ?int $magentoStoreId, int $parentId): array
     {
-        return $this->getCategories($storeId, $categoryId);
+        $magento  = $this->magento($vendor);
+
+        $response = $magento->get('categories/list', [
+            'searchCriteria[filterGroups][0][filters][0][field]'         => 'parent_id',
+            'searchCriteria[filterGroups][0][filters][0][value]'         => $parentId,
+            'searchCriteria[filterGroups][0][filters][0][conditionType]' => 'eq',
+            'searchCriteria[filterGroups][1][filters][0][field]'         => 'is_active',
+            'searchCriteria[filterGroups][1][filters][0][value]'         => 1,
+        ]);
+
+        return $response['items'] ?? [];
     }
 
-    /**
-     * Get breadcrumbs for category
-     */
-    public function getBreadcrumbs($storeId, $categoryId): array
+    public function getBreadcrumbs(Vendor $vendor, ?int $magentoStoreId, int $categoryId): array
     {
+        // Magento mein direct breadcrumb API nahi — path se build karte hain
+        $magento  = $this->magento($vendor);
+        $category = $magento->get("categories/{$categoryId}");
+
         $breadcrumbs = [];
-        $category = $this->getCategoryById($categoryId);
-        
-        while ($category && $category['parent_id'] != 0) {
-            array_unshift($breadcrumbs, [
-                'id' => $category['id'],
-                'name' => $category['name'],
-                'slug' => $category['url_key'],
-            ]);
-            $category = $this->getCategoryById($category['parent_id']);
+        $pathIds     = array_filter(explode('/', $category['path'] ?? ''));
+
+        // Skip root (1) and Default Category (2)
+        $relevantIds = array_slice(array_values($pathIds), 2);
+
+        foreach ($relevantIds as $id) {
+            try {
+                $cat = $magento->get("categories/{$id}");
+                $breadcrumbs[] = [
+                    'id'      => $cat['id'],
+                    'name'    => $cat['name'],
+                    'url_key' => data_get($cat, 'custom_attributes.*.value', $cat['id']),
+                ];
+            } catch (\Throwable) {
+                // skip missing categories
+            }
         }
-        
+
         return $breadcrumbs;
     }
 
-    /**
-     * Get featured categories
-     */
-    public function getFeaturedCategories($storeId, $limit = 8): array
+    public function getFeaturedCategories(Vendor $vendor, ?int $magentoStoreId, int $limit = 8): array
     {
-        $categories = $this->getCategories($storeId, null, true);
-        
-        // Sort by product count and take top ones
-        usort($categories, function($a, $b) {
-            return $b['product_count'] <=> $a['product_count'];
-        });
-        
-        return array_slice($categories, 0, $limit);
+        $magento  = $this->magento($vendor);
+
+        // is_anchor=1 categories are typically featured/navigation categories
+        $response = $magento->get('categories/list', [
+            'searchCriteria[filterGroups][0][filters][0][field]'         => 'is_active',
+            'searchCriteria[filterGroups][0][filters][0][value]'         => 1,
+            'searchCriteria[filterGroups][1][filters][0][field]'         => 'include_in_menu',
+            'searchCriteria[filterGroups][1][filters][0][value]'         => 1,
+            'searchCriteria[filterGroups][1][filters][0][conditionType]' => 'eq',
+            'searchCriteria[pageSize]'                                   => $limit,
+        ]);
+
+        return $response['items'] ?? [];
     }
 
-    /**
-     * Get category by ID
-     */
-    private function getCategoryById($categoryId): ?array
+    private function flattenCategories(array $children): array
     {
-        try {
-            $response = Http::withToken($this->magentoToken)
-                ->get($this->magentoBaseUrl . "/rest/V1/categories/{$categoryId}");
-
-            if ($response->successful()) {
-                return $this->formatCategory($response->json());
-            }
-
-            return null;
-
-        } catch (\Exception $e) {
-            return null;
+        $result = [];
+        foreach ($children as $cat) {
+            $result[] = [
+                'id'       => $cat['id'],
+                'name'     => $cat['name'],
+                'level'    => $cat['level'] ?? null,
+                'url_key'  => $cat['url_key'] ?? null,
+                'children' => $this->flattenCategories($cat['children_data'] ?? []),
+            ];
         }
-    }
-
-    /**
-     * Get product count for category
-     */
-    private function getCategoryProductCount($categoryId): int
-    {
-        try {
-            $response = Http::withToken($this->magentoToken)
-                ->get($this->magentoBaseUrl . '/rest/V1/products', [
-                    'searchCriteria' => [
-                        'filter_groups' => [
-                            [
-                                'filters' => [
-                                    [
-                                        'field' => 'category_id',
-                                        'value' => $categoryId,
-                                        'condition_type' => 'eq',
-                                    ],
-                                ],
-                            ],
-                        ],
-                        'page_size' => 1,
-                    ],
-                ]);
-
-            if ($response->successful()) {
-                return $response->json()['total_count'] ?? 0;
-            }
-
-            return 0;
-
-        } catch (\Exception $e) {
-            return 0;
-        }
-    }
-
-    /**
-     * Format category data
-     */
-    private function formatCategory($category): array
-    {
-        return [
-            'id' => $category['id'],
-            'name' => $category['name'],
-            'slug' => $category['url_key'] ?? $this->slugify($category['name']),
-            'description' => $category['description'] ?? null,
-            'image' => $category['image'] ?? null,
-            'parent_id' => $category['parent_id'],
-            'level' => $category['level'],
-            'position' => $category['position'],
-            'is_active' => $category['is_active'],
-            'product_count' => $category['product_count'] ?? 0,
-            'children' => [],
-        ];
-    }
-
-    /**
-     * Format multiple categories
-     */
-    private function formatCategories(array $categories): array
-    {
-        return array_map([$this, 'formatCategory'], $categories);
-    }
-
-    /**
-     * Build category tree recursively
-     */
-    private function buildCategoryTree($category, $maxDepth, $currentDepth = 0): array
-    {
-        if ($currentDepth >= $maxDepth) {
-            return [];
-        }
-
-        $formatted = $this->formatCategory($category);
-        
-        if (!empty($category['children_data'])) {
-            foreach ($category['children_data'] as $child) {
-                $formatted['children'][] = $this->buildCategoryTree($child, $maxDepth, $currentDepth + 1);
-            }
-        }
-        
-        return $formatted;
-    }
-
-    /**
-     * Create slug from string
-     */
-    private function slugify($string): string
-    {
-        return strtolower(trim(preg_replace('/[^A-Za-z0-9-]+/', '-', $string)));
-    }
-
-    /**
-     * Get fallback categories
-     */
-    private function getFallbackCategories(): array
-    {
-        return [
-            [
-                'id' => 1,
-                'name' => 'Electronics',
-                'slug' => 'electronics',
-                'product_count' => 0,
-                'children' => [],
-            ],
-            [
-                'id' => 2,
-                'name' => 'Clothing',
-                'slug' => 'clothing',
-                'product_count' => 0,
-                'children' => [],
-            ],
-            [
-                'id' => 3,
-                'name' => 'Home & Garden',
-                'slug' => 'home-garden',
-                'product_count' => 0,
-                'children' => [],
-            ],
-        ];
+        return $result;
     }
 }
