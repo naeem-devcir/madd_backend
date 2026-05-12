@@ -388,7 +388,7 @@ Route::prefix('v1')->group(function () {
         // User Management
         Route::prefix('users')->group(function () {
             Route::get('/', [Api\Admin\AdminUserController::class, 'index']);
-            Route::post('/', [Api\Admin\AdminVendorController::class, 'store']);
+            // Route::post('/', [Api\Admin\AdminVendorController::class, 'store']);
             Route::get('{id}', [Api\Admin\AdminUserController::class, 'show']);
             Route::post('/', [Api\Admin\AdminUserController::class, 'store']);
             Route::put('{id}', [Api\Admin\AdminUserController::class, 'update']);
@@ -464,11 +464,6 @@ Route::prefix('v1')->group(function () {
         //     Route::post('{id}/unfeature', [Api\Admin\AdminProductController::class, 'unfeature']);
         // });
 
-
-
-
-
-
         Route::prefix('products')->group(function () {
 
             // ── Statistics ────────────────────────────────────────────────────────────
@@ -504,9 +499,51 @@ Route::prefix('v1')->group(function () {
         });
 
 
+        // Categories management
+        Route::prefix('vendors/{vendor}/categories')->group(function () {
+            Route::get('/', [Api\Admin\AdminCategoryController::class, 'index']);              // READ local
+            Route::get('/tree', [Api\Admin\AdminCategoryController::class, 'tree']);           // READ local
+            Route::get('/stats', [Api\Admin\AdminCategoryController::class, 'stats']);         // READ local
+            Route::get('/export', [Api\Admin\AdminCategoryController::class, 'export']);       // READ local
+            Route::get('/{uuid}', [Api\Admin\AdminCategoryController::class, 'show']);         // READ local
+
+            Route::post('/', [Api\Admin\AdminCategoryController::class, 'store']);             // WRITE via service
+            Route::post('/sync', [Api\Admin\AdminCategoryController::class, 'sync']);          // WRITE via service
+            Route::post('/bulk-positions', [Api\Admin\AdminCategoryController::class, 'bulkUpdatePositions']); // WRITE via service
+
+            Route::put('/{uuid}', [Api\Admin\AdminCategoryController::class, 'update']);       // WRITE via service
+
+            Route::delete('/{uuid}', [Api\Admin\AdminCategoryController::class, 'destroy']);   // WRITE via service
+        });
 
 
 
+        // CMS BLOCK
+        Route::prefix('vendors/{vendorUuid}/cms-blocks')->group(function () {
+            // READ operations (from local DB)
+            Route::get('/', [App\Http\Controllers\Api\Admin\AdminCmsBlockController::class, 'index']);
+            Route::get('/by-identifier/{identifier}', [App\Http\Controllers\Api\Admin\AdminCmsBlockController::class, 'byIdentifier']);
+            Route::get('/{uuid}', [App\Http\Controllers\Api\Admin\AdminCmsBlockController::class, 'show']);
+
+            // WRITE operations (Magento → Local)
+            Route::post('/', [App\Http\Controllers\Api\Admin\AdminCmsBlockController::class, 'store']);
+            Route::post('/sync', [App\Http\Controllers\Api\Admin\AdminCmsBlockController::class, 'sync']);
+            Route::put('/{uuid}', [App\Http\Controllers\Api\Admin\AdminCmsBlockController::class, 'update']);
+            Route::delete('/{uuid}', [App\Http\Controllers\Api\Admin\AdminCmsBlockController::class, 'destroy']);
+        });
+        // Admin routes for CMS Pages
+        Route::prefix('vendors/{vendorUuid}/cms-pages')->group(function () {
+            // READ operations (from local DB)
+            Route::get('/', [App\Http\Controllers\Api\Admin\AdminCmsPageController::class, 'index']);
+            Route::get('/by-identifier/{identifier}', [App\Http\Controllers\Api\Admin\AdminCmsPageController::class, 'byIdentifier']);
+            Route::get('/{uuid}', [App\Http\Controllers\Api\Admin\AdminCmsPageController::class, 'show']);
+
+            // WRITE operations (Magento → Local)
+            Route::post('/', [App\Http\Controllers\Api\Admin\AdminCmsPageController::class, 'store']);
+            Route::post('/sync', [App\Http\Controllers\Api\Admin\AdminCmsPageController::class, 'sync']);
+            Route::put('/{uuid}', [App\Http\Controllers\Api\Admin\AdminCmsPageController::class, 'update']);
+            Route::delete('/{uuid}', [App\Http\Controllers\Api\Admin\AdminCmsPageController::class, 'destroy']);
+        });
 
         // Order Management
         Route::prefix('orders')->group(function () {

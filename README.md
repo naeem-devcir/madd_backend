@@ -3,32 +3,31 @@
 
 Payloads:
 
-    Coupon Create
+-   -
+- PAYLOAD CRUD
+-   - POST http://127.0.0.1:8000/api/v1/admin/coupons/
 
-    POST http://127.0.0.1:8000/api/v1/admin/coupons/
+        {
+        "code": "TESTCOUPON_5",
+        "type": "platform",
+        "vendor_id": "7bb5b8ed-1053-4dcd-aeab-7f47c55bda75",
+        "discount_type": "percentage",
+        "discount_value": 15,
+        "min_order_amount": 50,
+        "max_uses": 200,
+        "per_customer_limit": 2,
+        "starts_at": "2024-06-01 00:00:00",
+        "expires_at": "2024-12-31 23:59:59",
+        "is_active": true,
+        "description": "Summer sale 15% off",
+        "applicable_to": "all"
+        }
 
-    {
-    "code": "TESTCOUPON_5",
-    "type": "platform",
-    "vendor_id": "7bb5b8ed-1053-4dcd-aeab-7f47c55bda75",
-    "discount_type": "percentage",
-    "discount_value": 15,
-    "min_order_amount": 50,
-    "max_uses": 200,
-    "per_customer_limit": 2,
-    "starts_at": "2024-06-01 00:00:00",
-    "expires_at": "2024-12-31 23:59:59",
-    "is_active": true,
-    "description": "Summer sale 15% off",
-    "applicable_to": "all"
-    }
+-   -
+- PRODUCT CRUD
+-   - POST http://127.0.0.1:8000/api/v1/admin/products/
 
-    Product Create
-
-    POST http://127.0.0.1:8000/api/v1/admin/products/
-
-
-    {
+        {
 
 "vendor_id": 1,
 "vendor_store_id": 2,
@@ -64,4 +63,109 @@ Payloads:
 "Samsung S24 Ultra"
 ]
 }
+}
+
+-   -
+- CATEGORY CRUD
+-   -
+
+http://127.0.0.1:8000/api/v1/admin/vendors/1/categories/
+{
+"name": "Premium Electronics",
+"is_active": true,
+"include_in_menu": true,
+"position": 1,
+"url_key": "premium-electronics",
+"description": "Premium electronics with extended warranty",
+"meta_title": "Premium Electronics Store",
+"meta_description": "Best premium electronics deals",
+"parent_id": null
+}
+
+-   -
+- CMSBLOCK CRUD
+-   -
+
+GET ALL CMSBLOCKS
+GET http://127.0.0.1:8000/api/v1/admin/vendors/7{vendorUuid}/cms-blocks/{ccae08e3-4943-458d-85be-714fda3304a1}
+
+GET BY UUID CMSBLOCK
+GET http://127.0.0.1:8000/api/v1/admin/vendors/7bb5b8ed-1053-4dcd-aeab-7f47c55bda75/cms-blocks/ccae08e3-4943-458d-85be-714fda3304a1
+
+GET BY IDENTIFIER CMSBLOCK
+http://127.0.0.1:8000/api/v1/admin/vendors/7{vendorUuid}/cms-blocks/by-identifier/{identifier}
+
+http://127.0.0.1:8000/api/v1/admin/vendors/{vendorUuid}/cms-blocks
+{
+"identifier": "homepage-banner",
+"title": "Homepage Banner",
+"content": "<div>Welcome</div>",
+"active": true
+}
+
+POST http://127.0.0.1:8000/api/v1/admin/vendors/{vendorUuid}/cms-blocks
+
+{
+"identifier": "homepage-banner",
+"title": "Homepage Banner",
+"content": "<div>Welcome</div>",
+"active": true
+}
+
+PUT http://127.0.0.1:8000/api/v1/admin/vendors/{vendorUuid}/cms-blocks/{blockUuid}
+
+{
+"identifier": "homepage-banner-updated",
+"title": "Homepage Banner Updated",
+"content": "<div>Welcome Again</div>",
+"active": true
+}
+
+Delete http://127.0.0.1:8000/api/v1/admin/vendors/{vendorUuid}/cms-blocks/{blockUuid}
+
+
+-   -
+- CMSPAGE CRUD
+-   -
+
+GET ALL
+GET http://127.0.0.1:8000/api/v1/admin/vendors/{vendorUuid}/cms-pages/
+
+
+GET BY UUID
+GET http://127.0.0.1:8000/api/v1/admin/vendors/{vendorUuid}/cms-pages/{cmspageUuid}
+
+GET BY identifier
+http://127.0.0.1:8000/api/v1/admin/vendors/{vendorUuid}/cms-pages/by-identifier/{identifier}
+
+
+create cms page
+POST http://127.0.0.1:8000/api/v1/admin/vendors/{vendorUuid}/cms-pages/
+{
+    "identifier": "case-studies",
+    "title": "Case Studies",
+    "content": "<h1>Our Case Studies</h1><p>We are the best...</p>",
+    "page_layout": "1column",
+    "content_heading": "Welcome Case Studies",
+    "is_active": true,
+    "sort_order": 1,
+    "meta_title": "Our Case Studies",
+    "meta_keywords": "case studies, portfolio, projects",
+    "meta_description": "Learn more about our projects"
+}
+
+
+Update the cmspage
+PUT http://127.0.0.1:8000/api/v1/admin/vendors/{vendorUuid}/cms-pages/{cmspageUuid}
+{
+    "identifier": "case-studies-updated",
+    "title": "Case Studies updated",
+    "content": "<h1>Our Case Studies</h1><p>We are the best...</p>",
+    "page_layout": "1column",
+    "content_heading": "Welcome Case Studies updated",
+    "is_active": true,
+    "sort_order": 1,
+    "meta_title": "Our Case Studies",
+    "meta_keywords": "case studies, portfolio, projects",
+    "meta_description": "Learn more about our projects"
 }

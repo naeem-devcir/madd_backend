@@ -89,7 +89,6 @@ class ProductCategoryController extends Controller
                     'total'      => count($categories),
                 ],
             ]);
-
         } catch (ModelNotFoundException) {
             return $this->notFound('Store not found or inactive');
         } catch (Throwable $e) {
@@ -128,7 +127,6 @@ class ProductCategoryController extends Controller
                     'tree'  => $tree,
                 ],
             ]);
-
         } catch (ModelNotFoundException) {
             return $this->notFound('Store not found or inactive');
         } catch (Throwable $e) {
@@ -167,7 +165,6 @@ class ProductCategoryController extends Controller
                     'categories' => $featured,
                 ],
             ]);
-
         } catch (ModelNotFoundException) {
             return $this->notFound('Store not found or inactive');
         } catch (Throwable $e) {
@@ -179,7 +176,66 @@ class ProductCategoryController extends Controller
     // GET /catalog/{storeSlug}/categories/{slug}
     // -------------------------------------------------------------------------
 
-    public function show(Request $request, string $storeSlug, string $slug): JsonResponse
+    // public function show(Request $request, string $storeSlug, string $slug): JsonResponse
+    // {
+    //     $request->validate([
+    //         'per_page' => 'nullable|integer|min:1|max:100',
+    //         'sort_by'  => 'nullable|in:newest,price_asc,price_desc,popular',
+    //     ]);
+
+    //     try {
+    //         $store = $this->resolveStore($storeSlug);
+
+    //         $cacheKey = "store_category_{$store->id}_{$slug}";
+
+    //         $category = Cache::remember($cacheKey, 3600, function () use ($store, $slug) {
+    //             return $this->categoryService->getCategoryBySlug(
+    //                 $store->vendor,
+    //                 $store->magento_store_id,
+    //                 $slug
+    //             );
+    //         });
+
+    //         if (! $category) {
+    //             return $this->notFound('Category not found');
+    //         }
+
+    //         // Products, subcategories, breadcrumbs — not cached (paginated/sorted)
+    //         $perPage = (int) $request->input('per_page', 20);
+    //         $sortBy  = $request->input('sort_by', 'newest');
+
+    //         [$products, $subcategories, $breadcrumbs] = [
+    //             $this->categoryService->getCategoryProducts(
+    //                 $store->vendor, $store->magento_store_id, $category['id'], $perPage, $sortBy
+    //             ),
+    //             $this->categoryService->getSubcategories(
+    //                 $store->vendor, $store->magento_store_id, $category['id']
+    //             ),
+    //             $this->categoryService->getBreadcrumbs(
+    //                 $store->vendor, $store->magento_store_id, $category['id']
+    //             ),
+    //         ];
+
+    //         return response()->json([
+    //             'success' => true,
+    //             'data'    => [
+    //                 'store'         => $this->storeInfo($store),
+    //                 'category'      => $category,
+    //                 'breadcrumbs'   => $breadcrumbs,
+    //                 'subcategories' => $subcategories,
+    //                 'products'      => $products,
+    //             ],
+    //         ]);
+
+    //     } catch (ModelNotFoundException) {
+    //         return $this->notFound('Store not found or inactive');
+    //     } catch (Throwable $e) {
+    //         return $this->serverError('Failed to fetch category', $e);
+    //     }
+    // }
+    // Update the show method in ProductCategoryController
+
+    public function show(Request $request, string $storeSlug, string $uuid): JsonResponse
     {
         $request->validate([
             'per_page' => 'nullable|integer|min:1|max:100',
@@ -189,54 +245,41 @@ class ProductCategoryController extends Controller
         try {
             $store = $this->resolveStore($storeSlug);
 
-            $cacheKey = "store_category_{$store->id}_{$slug}";
+            // Get category by UUID from local DB
+            $category = $this->categoryService
+                ->forVendor($store->vendor)
+                ->getCategoryByUuid($uuid);
 
-            $category = Cache::remember($cacheKey, 3600, function () use ($store, $slug) {
-                return $this->categoryService->getCategoryBySlug(
-                    $store->vendor,
-                    $store->magento_store_id,
-                    $slug
-                );
-            });
-
-            if (! $category) {
+            if (!$category) {
                 return $this->notFound('Category not found');
             }
 
-            // Products, subcategories, breadcrumbs — not cached (paginated/sorted)
+            // Get products from Magento (or local if you have product table)
             $perPage = (int) $request->input('per_page', 20);
             $sortBy  = $request->input('sort_by', 'newest');
 
-            [$products, $subcategories, $breadcrumbs] = [
-                $this->categoryService->getCategoryProducts(
-                    $store->vendor, $store->magento_store_id, $category['id'], $perPage, $sortBy
-                ),
-                $this->categoryService->getSubcategories(
-                    $store->vendor, $store->magento_store_id, $category['id']
-                ),
-                $this->categoryService->getBreadcrumbs(
-                    $store->vendor, $store->magento_store_id, $category['id']
-                ),
-            ];
+            $products = $this->categoryService->getCategoryProducts(
+                $store->vendor,
+                $store->magento_store_id,
+                $category['magento_id'], // Use magento_id for product fetch
+                $perPage,
+                $sortBy
+            );
 
             return response()->json([
                 'success' => true,
                 'data'    => [
                     'store'         => $this->storeInfo($store),
                     'category'      => $category,
-                    'breadcrumbs'   => $breadcrumbs,
-                    'subcategories' => $subcategories,
                     'products'      => $products,
                 ],
             ]);
-
         } catch (ModelNotFoundException) {
             return $this->notFound('Store not found or inactive');
         } catch (Throwable $e) {
             return $this->serverError('Failed to fetch category', $e);
         }
     }
-
     // -------------------------------------------------------------------------
     // GET /catalog/{storeSlug}/categories/{slug}/products
     // -------------------------------------------------------------------------
@@ -278,7 +321,6 @@ class ProductCategoryController extends Controller
                     'total'    => $products['total'] ?? count($products),
                 ],
             ]);
-
         } catch (ModelNotFoundException) {
             return $this->notFound('Store not found or inactive');
         } catch (Throwable $e) {

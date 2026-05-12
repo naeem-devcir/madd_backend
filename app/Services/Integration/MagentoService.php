@@ -27,7 +27,7 @@ class MagentoService
         if ($vendorOrToken instanceof Vendor) {
             // Initialize from vendor DB credentials
             $this->vendor = $vendorOrToken;
-            
+
             if (empty($vendorOrToken->magento_base_url)) {
                 throw new \Exception('Magento base URL is missing for vendor ID: ' . $vendorOrToken->id);
             }
@@ -127,7 +127,6 @@ class MagentoService
         if ($response->failed()) {
             throw new \Exception("Magento token fetch failed [{$url}]: " . $response->body());
         }
-
         return trim($response->body(), '"');
     }
 
@@ -188,9 +187,62 @@ class MagentoService
      * @return array
      * @throws \Exception
      */
+    // private function request(string $method, string $endpoint, array $data = []): array
+    // {
+    //     $url = "{$this->baseUrl}/rest/V1/{$endpoint}";
+
+    //     $response = match ($method) {
+    //         'GET' => $this->http()->get($url, $data),
+    //         'POST' => $this->http()->post($url, $data),
+    //         'PUT' => $this->http()->put($url, $data),
+    //         'DELETE' => $this->http()->delete($url),
+    //     };
+
+    //     // Token expired - refresh and retry once
+    //     if ($response->status() === 401 && $this->vendor) {
+    //         Log::warning("Magento token expired for vendor {$this->vendor->id}, refreshing...");
+    //         $this->token = $this->fetchAndSaveToken($this->vendor);
+
+    //         $response = match ($method) {
+    //             'GET' => $this->http()->get($url, $data),
+    //             'POST' => $this->http()->post($url, $data),
+    //             'PUT' => $this->http()->put($url, $data),
+    //             'DELETE' => $this->http()->delete($url),
+    //         };
+    //     }
+
+    //     if ($response->failed()) {
+    //         Log::error("Magento API [{$method} {$endpoint}]", [
+    //             'vendor_id' => $this->vendor?->id,
+    //             'status' => $response->status(),
+    //             'body' => $response->body(),
+    //         ]);
+    //         throw new \Exception("Magento [{$endpoint}] failed: " . $response->body());
+    //     }
+    //     Log::error($response);
+    //     $json = $response->json();
+
+    //     if (is_array($json)) {
+    //         return $json;
+    //     }
+    //     return ['success' => (bool) $json, 'value' => $json];
+    // }
+    /**
+     * Make HTTP request to Magento API with comprehensive logging
+     */
     private function request(string $method, string $endpoint, array $data = []): array
     {
         $url = "{$this->baseUrl}/rest/V1/{$endpoint}";
+
+        // COMPLETE LOG - REQUEST
+        Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        Log::info('MAGENTO API CALL');
+        Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        Log::info('METHOD: ' . $method);
+        Log::info('ENDPOINT: ' . $endpoint);
+        Log::info('FULL URL: ' . $url);
+        Log::info('VENDOR ID: ' . ($this->vendor?->id ?? 'MANUAL'));
+        Log::info('PAYLOAD SENT: ', $data);
 
         $response = match ($method) {
             'GET' => $this->http()->get($url, $data),
@@ -199,9 +251,22 @@ class MagentoService
             'DELETE' => $this->http()->delete($url),
         };
 
+        // COMPLETE LOG - RESPONSE
+        Log::info('RESPONSE STATUS: ' . $response->status());
+        Log::info('RESPONSE BODY: ' . $response->body());
+        Log::info('RESPONSE HEADERS: ', $response->headers());
+
+        // Check if response is successful
+        if ($response->successful()) {
+            Log::info('✓ API CALL SUCCESSFUL');
+        } else {
+            Log::error('✗ API CALL FAILED');
+        }
+        Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
         // Token expired - refresh and retry once
         if ($response->status() === 401 && $this->vendor) {
-            Log::warning("Magento token expired for vendor {$this->vendor->id}, refreshing...");
+            Log::warning('⚠️ TOKEN EXPIRED - REFRESHING AND RETRYING');
             $this->token = $this->fetchAndSaveToken($this->vendor);
 
             $response = match ($method) {
@@ -210,15 +275,14 @@ class MagentoService
                 'PUT' => $this->http()->put($url, $data),
                 'DELETE' => $this->http()->delete($url),
             };
+
+            Log::info('RETRY RESPONSE STATUS: ' . $response->status());
+            Log::info('RETRY RESPONSE BODY: ' . $response->body());
+            Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
         }
 
         if ($response->failed()) {
-            Log::error("Magento API [{$method} {$endpoint}]", [
-                'vendor_id' => $this->vendor?->id,
-                'status' => $response->status(),
-                'body' => $response->body(),
-            ]);
-            throw new \Exception("Magento [{$endpoint}] failed: " . $response->body());
+            throw new \Exception("Magento [{$endpoint}] failed with status {$response->status()}: " . $response->body());
         }
 
         $json = $response->json();
@@ -226,14 +290,15 @@ class MagentoService
         if (is_array($json)) {
             return $json;
         }
-
         return ['success' => (bool) $json, 'value' => $json];
     }
+
 
     /**
      * GET request helper
      */
-    private function get(string $ep, array $q = []): array
+    // private function get(string $ep, array $q = []): array
+    public function get(string $ep, array $q = []): array
     {
         return $this->request('GET', $ep, $q);
     }
@@ -241,7 +306,8 @@ class MagentoService
     /**
      * POST request helper
      */
-    private function post(string $ep, array $b = []): array
+    // private function post(string $ep, array $b = []): array
+    public function post(string $ep, array $b = []): array
     {
         return $this->request('POST', $ep, $b);
     }
@@ -249,7 +315,8 @@ class MagentoService
     /**
      * PUT request helper
      */
-    private function put(string $ep, array $b = []): array
+    // private function put(string $ep, array $b = []): array
+    public function put(string $ep, array $b = []): array
     {
         return $this->request('PUT', $ep, $b);
     }
@@ -257,7 +324,8 @@ class MagentoService
     /**
      * DELETE request helper
      */
-    private function delete(string $ep): array
+    // private function delete(string $ep): array
+    public function delete(string $ep): array
     {
         return $this->request('DELETE', $ep);
     }
@@ -313,7 +381,7 @@ class MagentoService
         if (!isset($ruleData['rule']['rule_id'])) {
             $ruleData['rule']['rule_id'] = $ruleId;
         }
-        
+
         return $this->put('salesRules/' . $ruleId, $ruleData);
     }
 
@@ -354,27 +422,27 @@ class MagentoService
     public function searchSalesRules(array $criteria = []): array
     {
         $query = [];
-        
+
         if (!empty($criteria['name'])) {
             $query['searchCriteria[filter_groups][0][filters][0][field]'] = 'name';
             $query['searchCriteria[filter_groups][0][filters][0][value]'] = $criteria['name'];
             $query['searchCriteria[filter_groups][0][filters][0][condition_type]'] = 'like';
         }
-        
+
         if (!empty($criteria['is_active'])) {
             $query['searchCriteria[filter_groups][1][filters][0][field]'] = 'is_active';
             $query['searchCriteria[filter_groups][1][filters][0][value]'] = $criteria['is_active'] ? '1' : '0';
             $query['searchCriteria[filter_groups][1][filters][0][condition_type]'] = 'eq';
         }
-        
+
         if (!empty($criteria['page_size'])) {
             $query['searchCriteria[pageSize]'] = $criteria['page_size'];
         }
-        
+
         if (!empty($criteria['current_page'])) {
             $query['searchCriteria[currentPage]'] = $criteria['current_page'];
         }
-        
+
         return $this->get('salesRules/search', $query);
     }
 
@@ -423,7 +491,7 @@ class MagentoService
                 'is_primary' => true, // Primary coupon for the rule
             ]
         ];
-        
+
         return $this->post('coupons', $couponData);
     }
 
@@ -441,7 +509,7 @@ class MagentoService
         if (!isset($couponData['coupon']['coupon_id'])) {
             $couponData['coupon']['coupon_id'] = $couponId;
         }
-        
+
         return $this->put('coupons/' . $couponId, $couponData);
     }
 
@@ -489,7 +557,7 @@ class MagentoService
     {
         $query = [];
         $filterIndex = 0;
-        
+
         // Filter by rule_id
         if (!empty($criteria['rule_id'])) {
             $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][field]"] = 'rule_id';
@@ -497,7 +565,7 @@ class MagentoService
             $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][condition_type]"] = 'eq';
             $filterIndex++;
         }
-        
+
         // Filter by coupon code
         if (!empty($criteria['code'])) {
             $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][field]"] = 'code';
@@ -505,7 +573,7 @@ class MagentoService
             $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][condition_type]"] = 'eq';
             $filterIndex++;
         }
-        
+
         // Filter by usage count range
         if (isset($criteria['min_uses'])) {
             $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][field]"] = 'times_used';
@@ -513,29 +581,29 @@ class MagentoService
             $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][condition_type]"] = 'gteq';
             $filterIndex++;
         }
-        
+
         if (isset($criteria['max_uses'])) {
             $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][field]"] = 'times_used';
             $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][value]"] = $criteria['max_uses'];
             $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][condition_type]"] = 'lteq';
             $filterIndex++;
         }
-        
+
         // Pagination
         if (!empty($criteria['page_size'])) {
             $query['searchCriteria[pageSize]'] = $criteria['page_size'];
         }
-        
+
         if (!empty($criteria['current_page'])) {
             $query['searchCriteria[currentPage]'] = $criteria['current_page'];
         }
-        
+
         // Sorting
         if (!empty($criteria['sort_field'])) {
             $query['searchCriteria[sortOrders][0][field]'] = $criteria['sort_field'];
             $query['searchCriteria[sortOrders][0][direction]'] = $criteria['sort_direction'] ?? 'DESC';
         }
-        
+
         return $this->get('coupons/search', $query);
     }
 
@@ -551,7 +619,7 @@ class MagentoService
     {
         $result = $this->searchCoupons(['code' => $couponCode]);
         $items = $result['items'] ?? [];
-        
+
         return !empty($items) ? $items[0] : null;
     }
 
@@ -581,7 +649,7 @@ class MagentoService
                 'suffix' => $suffix,
             ]
         ];
-        
+
         return $this->post('coupons/generate', $data);
     }
 
@@ -1049,11 +1117,141 @@ class MagentoService
     /**
      * Get all categories
      * 
+     * @param array $params - Query parameters (storeId, parentId, etc.)
      * @return array
      */
-    public function getCategories(): array
+    public function getCategories(array $params = []): array
     {
-        return $this->get('categories');
+        return $this->get('categories', $params);
+    }
+
+    /**
+     * Get single category by ID
+     * 
+     * @param int $categoryId
+     * @return array
+     */
+    public function getCategory(int $categoryId): array
+    {
+        return $this->get('categories/' . $categoryId);
+    }
+
+    /**
+     * Create new category
+     * 
+     * @param array $categoryData
+     * @return array
+     */
+    public function createCategory(array $categoryData): array
+    {
+        return $this->post('categories', $categoryData);
+    }
+
+    /**
+     * Update existing category
+     * PUT /rest/V1/categories/{categoryId}
+     * 
+     * @param int $categoryId
+     * @param array $categoryData
+     * @return array
+     */
+    public function updateCategory(int $categoryId, array $categoryData): array
+    {
+        // Ensure ID is in the payload
+        if (!isset($categoryData['category']['id'])) {
+            $categoryData['category']['id'] = $categoryId;
+        }
+
+        // Remove any fields that might cause issues
+        unset($categoryData['category']['level']);
+        unset($categoryData['category']['path']);
+        unset($categoryData['category']['children']);
+        unset($categoryData['category']['created_at']);
+        unset($categoryData['category']['updated_at']);
+        unset($categoryData['category']['default_sort_by']);
+        unset($categoryData['category']['available_sort_by']);
+
+        return $this->put('categories/' . $categoryId, $categoryData);
+    }
+    /**
+     * Update category with store ID scope
+     */
+    public function updateCategoryWithStore(int $categoryId, array $categoryData, int $storeId = 0): array
+    {
+        return $this->put('categories/' . $categoryId . '?storeId=' . $storeId, $categoryData);
+    }
+    /**
+     * Delete category
+     * DELETE /rest/V1/categories/{categoryId}
+     * 
+     * @param int $categoryId
+     * @return array
+     */
+    public function deleteCategory(int $categoryId): array
+    {
+        try {
+            return $this->delete('categories/' . $categoryId);
+        } catch (\Exception $e) {
+            // Magento returns 200 OK on successful delete, but check for specific errors
+            if (str_contains($e->getMessage(), '404')) {
+                throw new \Exception('Category not found in Magento with ID: ' . $categoryId);
+            }
+            if (str_contains($e->getMessage(), 'Cannot delete root category')) {
+                throw new \Exception('Cannot delete root category in Magento');
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Get category tree
+     * 
+     * @param int|null $rootCategoryId
+     * @param int|null $storeId
+     * @param int $depth
+     * @return array
+     */
+    public function getCategoryTree(?int $rootCategoryId = null, ?int $storeId = null, int $depth = 5): array
+    {
+        $params = ['depth' => $depth];
+
+        if ($rootCategoryId) {
+            $params['rootCategoryId'] = $rootCategoryId;
+        }
+
+        if ($storeId) {
+            $params['storeId'] = $storeId;
+        }
+
+        return $this->get('categories', $params);
+    }
+
+    /**
+     * Get category products
+     * 
+     * @param int $categoryId
+     * @param int $page
+     * @param int $pageSize
+     * @param string|null $sortField
+     * @param string|null $sortOrder
+     * @return array
+     */
+    public function getCategoryProducts(int $categoryId, int $page = 1, int $pageSize = 20, ?string $sortField = null, ?string $sortOrder = 'DESC'): array
+    {
+        $filters = [
+            'searchCriteria[filterGroups][0][filters][0][field]' => 'category_id',
+            'searchCriteria[filterGroups][0][filters][0][value]' => $categoryId,
+            'searchCriteria[filterGroups][0][filters][0][conditionType]' => 'eq',
+            'searchCriteria[pageSize]' => $pageSize,
+            'searchCriteria[currentPage]' => $page,
+        ];
+
+        if ($sortField) {
+            $filters['searchCriteria[sortOrders][0][field]'] = $sortField;
+            $filters['searchCriteria[sortOrders][0][direction]'] = $sortOrder;
+        }
+
+        return $this->get('products', $filters);
     }
 
     // ─────────────────────────────────────────────────────
