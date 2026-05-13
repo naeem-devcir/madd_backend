@@ -256,6 +256,6 @@ class StoreService
 
     private function magentoForVendor(Vendor $vendor): MagentoService
     {
-        return new MagentoService($vendor);
+        return MagentoService::forVendor($vendor);
     }
 }

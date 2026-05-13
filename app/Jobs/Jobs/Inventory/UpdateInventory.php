@@ -3,7 +3,6 @@
 namespace App\Jobs\Jobs\Inventory;
 
 use App\Models\Product\VendorProduct;
-use App\Services\Integration\MagentoService;
 use App\Services\Notification\NotificationService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -40,10 +39,15 @@ class UpdateInventory implements ShouldQueue
     /**
      * Execute the job.
      */
-    public function handle(MagentoService $magentoService, NotificationService $notificationService): void
+    public function handle(NotificationService $notificationService): void
     {
         try {
             $product = VendorProduct::findOrFail($this->productId);
+            if (! $product->vendor) {
+                throw new \Exception('Cannot update Magento inventory because no vendor is attached to the product.');
+            }
+
+            $magentoService = $product->vendor->getMagentoService();
 
             // Get current stock from Magento
             $currentStock = $magentoService->getProductStock($product->magento_sku);

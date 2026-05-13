@@ -38,7 +38,7 @@ class CouponService
 
             try {
                 // STEP 1: Create in Magento first
-                $magento = new MagentoService($vendor);
+                $magento = MagentoService::forVendor($vendor);
 
                 // Build sales rule data
                 $salesRuleData = $this->buildSalesRuleData($data);
@@ -195,7 +195,7 @@ class CouponService
 
             try {
                 // STEP 1: Update in Magento first
-                $magento = new MagentoService($vendor);
+                $magento = MagentoService::forVendor($vendor);
 
                 // Prepare update data (only send fields that are being updated)
                 $updateData = $this->buildSalesRuleUpdateData($data, $coupon);
@@ -298,7 +298,7 @@ class CouponService
 
             try {
                 // STEP 1: Delete from Magento first
-                $magento = new MagentoService($vendor);
+                $magento = MagentoService::forVendor($vendor);
 
                 // Delete coupon if exists
                 if ($coupon->magento_coupon_id) {
@@ -367,7 +367,7 @@ class CouponService
 
             try {
                 // STEP 1: Update status in Magento first
-                $magento = new MagentoService($vendor);
+                $magento = MagentoService::forVendor($vendor);
                 $magento->updateSalesRuleStatus($coupon->magento_rule_id, $newStatus);
 
                 Log::info('Coupon status updated in Magento', [
@@ -422,7 +422,7 @@ class CouponService
         }
 
         try {
-            $magento = new MagentoService($vendor);
+            $magento = MagentoService::forVendor($vendor);
 
             // Get latest rule data from Magento
             $ruleData = $magento->getSalesRule($coupon->magento_rule_id);

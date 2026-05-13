@@ -246,7 +246,7 @@ class Vendor extends Model
 
     public function getMagentoService(): \App\Services\Integration\MagentoService
     {
-        return new \App\Services\Integration\MagentoService($this);
+        return \App\Services\Integration\MagentoService::forVendor($this);
     }
 
 
