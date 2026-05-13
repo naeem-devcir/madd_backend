@@ -1,11 +1,7 @@
 <?php
-
 namespace App\Services\Integration;
 
-use App\Models\Product\ProductDraft;
-use App\Models\Product\VendorProduct;
 use App\Models\Vendor\Vendor;
-use App\Models\Vendor\VendorStore;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -15,118 +11,170 @@ class MagentoService
     protected string $token;
     protected ?Vendor $vendor;
 
-    /**
-     * Constructor - Initialize Magento service with vendor credentials or manual token
-     * 
-     * @param Vendor|string|null $vendorOrToken - Vendor model instance or manual token string
-     * @param string|null $baseUrl - Manual base URL (used only with manual token)
-     * @throws \Exception
-     */
-    public function __construct(Vendor|string|null $vendorOrToken = null, ?string $baseUrl = null)
+    public static function forVendor(Vendor $vendor): self
     {
-        if ($vendorOrToken instanceof Vendor) {
-            // Initialize from vendor DB credentials
-            $this->vendor = $vendorOrToken;
-
-            if (empty($vendorOrToken->magento_base_url)) {
-                throw new \Exception('Magento base URL is missing for vendor ID: ' . $vendorOrToken->id);
-            }
-
-            $this->baseUrl = rtrim($vendorOrToken->magento_base_url, '/');
-            $this->token = $this->resolveToken($vendorOrToken);
-        } else {
-            // Manual initialization (fallback / master admin)
-            $this->vendor = null;
-            $this->baseUrl = rtrim($baseUrl ?? config('magento.base_url'), '/');
-            $this->token = $vendorOrToken ?? config('magento.access_token', '');
-        }
+        return new self($vendor);
     }
 
-    // ─────────────────────────────────────────────────────
-    // TOKEN RESOLUTION & AUTHENTICATION
-    // ─────────────────────────────────────────────────────
-
     /**
-     * Resolve valid token for vendor from database or fetch fresh
-     * Priority: Integration Token (permanent) > Admin Token (valid cache) > Fresh Fetch
+     * Constructor - Initialize Magento service with vendor credentials ONLY from database
+     * 
+     * @param Vendor $vendor - Vendor model instance (must have Magento credentials)
+     * @throws \Exception
+     */
+    public function __construct(Vendor $vendor)
+    {
+        // Store the vendor
+        $this->vendor = $vendor;
+        
+        // Validate required fields from vendors table
+        if (empty($vendor->magento_base_url)) {
+            throw new \Exception(
+                sprintf(
+                    'Magento base URL is missing for vendor "%s" (ID: %s). Please update the vendor\'s magento_base_url field.',
+                    $vendor->company_name ?? 'Unknown',
+                    $vendor->id ?? 'null'
+                )
+            );
+        }
+        
+        // Set base URL
+        $this->baseUrl = rtrim($vendor->magento_base_url, '/');
+        
+        // Get token from vendor (will throw exception if no valid credentials)
+        $this->token = $this->getTokenFromVendor($vendor);
+
+    }
+    
+    /**
+     * Get token from vendor (only from database, no external config)
      * 
      * @param Vendor $vendor
      * @return string
      * @throws \Exception
      */
-    protected function resolveToken(Vendor $vendor): string
+    private function getTokenFromVendor(Vendor $vendor): string
     {
-        // Priority 1: Integration token (permanent, never expires)
+        // Priority 1: Integration token (permanent, from vendors table)
         if (!empty($vendor->magento_access_token)) {
+            Log::info('Using integration token from vendor', [
+                'vendor_id' => $vendor->id
+            ]);
             return $vendor->magento_access_token;
         }
-
-        // Priority 2: Cached admin token (valid for ~3.5 hours)
-        if ($vendor->isMagentoTokenValid()) {
+        
+        // Priority 2: Valid cached admin token (from vendors table)
+        if ($this->isVendorTokenValid($vendor) && !empty($vendor->magento_admin_token)) {
+            Log::info('Using cached admin token from vendor', [
+                'vendor_id' => $vendor->id,
+                'expires_at' => $vendor->magento_token_expires_at
+            ]);
             return $vendor->magento_admin_token;
         }
-
-        // Priority 3: Ensure credentials exist before fetching
-        if (empty($vendor->magento_admin_username) || empty($vendor->magento_admin_pass)) {
-            throw new \Exception('Magento API credentials are missing for vendor ID: ' . $vendor->id);
+        
+        // Priority 3: Fetch new token using admin credentials from vendors table
+        if (!empty($vendor->magento_admin_username) && !empty($vendor->magento_admin_pass)) {
+            Log::info('Fetching new admin token from Magento API', [
+                'vendor_id' => $vendor->id,
+                'base_url' => $vendor->magento_base_url
+            ]);
+            return $this->fetchAndSaveToken($vendor);
         }
-
-        // Priority 4: Fetch fresh token
-        return $this->fetchAndSaveToken($vendor);
+        
+        // No valid credentials found in vendors table
+        throw new \Exception(
+            sprintf(
+                'No valid Magento credentials found for vendor "%s" (ID: %s). ' .
+                'Please ensure the vendor has either: ' .
+                '1) magento_access_token (integration token), OR ' .
+                '2) Both magento_admin_username and magento_admin_pass fields populated.',
+                $vendor->company_name ?? 'Unknown',
+                $vendor->id ?? 'null'
+            )
+        );
+    }
+    
+    /**
+     * Check if vendor's cached token is valid
+     */
+    private function isVendorTokenValid(Vendor $vendor): bool
+    {
+        return !empty($vendor->magento_admin_token) && 
+               !empty($vendor->magento_token_expires_at) && 
+               now()->lessThan($vendor->magento_token_expires_at);
     }
 
     /**
-     * Fetch fresh admin token and save to vendor record
-     * 
-     * @param Vendor $vendor
-     * @return string
+     * Fetch admin token using vendor's credentials and save to vendors table
      */
     public function fetchAndSaveToken(Vendor $vendor): string
     {
+        // Validate vendor has admin credentials
+        if (empty($vendor->magento_admin_username) || empty($vendor->magento_admin_pass)) {
+            throw new \Exception(
+                sprintf(
+                    'Cannot fetch token: Admin credentials missing for vendor "%s" (ID: %s)',
+                    $vendor->company_name ?? 'Unknown',
+                    $vendor->id ?? 'null'
+                )
+            );
+        }
+        
+        // Fetch token from Magento
         $token = $this->fetchAdminToken(
             $vendor->magento_base_url,
             $vendor->magento_admin_username,
             $vendor->magento_admin_pass,
         );
-
+        
+        // Save token to vendors table
         $vendor->update([
             'magento_admin_token' => $token,
-            'magento_token_expires_at' => now()->addMinutes(210), // 3.5 hours (Magento default)
+            'magento_token_expires_at' => now()->addMinutes(210), // 3.5 hours
             'magento_synced_at' => now(),
         ]);
-
+        
+        Log::info('Token fetched and saved to vendor', [
+            'vendor_id' => $vendor->id,
+            'expires_at' => now()->addMinutes(210)
+        ]);
+        
         return $token;
     }
 
     /**
      * Fetch admin token from Magento API
-     * POST /rest/V1/integration/admin/token
-     * 
-     * @param string|null $baseUrl
-     * @param string|null $username
-     * @param string|null $password
-     * @return string
-     * @throws \Exception
      */
     public function fetchAdminToken(
-        ?string $baseUrl = null,
-        ?string $username = null,
-        ?string $password = null
+        string $baseUrl,
+        string $username,
+        string $password
     ): string {
-        $url = rtrim($baseUrl ?? config('magento.base_url'), '/');
-        $user = $username ?? config('magento.admin_user');
-        $pass = $password ?? config('magento.admin_pass');
+        $url = rtrim($baseUrl, '/');
+        
+        Log::info('Fetching token from Magento', [
+            'url' => $url . '/rest/V1/integration/admin/token'
+        ]);
 
-        $response = Http::withHeaders(['Content-Type' => 'application/json'])
-            ->timeout(15)
-            ->post("{$url}/rest/V1/integration/admin/token", [
-                'username' => $user,
-                'password' => $pass,
-            ]);
+        $response = Http::withHeaders([
+            'Content-Type' => 'application/json',
+        ])
+        ->timeout(15)
+        ->post("{$url}/rest/V1/integration/admin/token", [
+            'username' => $username,
+            'password' => $password,
+        ]);
 
         if ($response->failed()) {
-            throw new \Exception("Magento token fetch failed [{$url}]: " . $response->body());
+            throw new \Exception(
+                sprintf(
+                    'Magento token fetch failed for URL %s: %s',
+                    $url,
+                    $response->body()
+                )
+            );
         }
+
         return trim($response->body(), '"');
     }
 
@@ -134,12 +182,6 @@ class MagentoService
     // HTTP CLIENT & REQUEST HANDLING
     // ─────────────────────────────────────────────────────
 
-    /**
-     * Get HTTP client with authentication headers
-     * 
-     * @return \Illuminate\Http\Client\PendingRequest
-     * @throws \Exception
-     */
     private function http()
     {
         $this->ensureToken();
@@ -151,98 +193,28 @@ class MagentoService
         ])->timeout(30);
     }
 
-    /**
-     * Ensure valid token exists, fetch if missing
-     * 
-     * @throws \Exception
-     */
     private function ensureToken(): void
     {
         if (!empty($this->token)) {
             return;
         }
-
-        if ($this->vendor) {
-            $this->token = $this->resolveToken($this->vendor);
-            return;
-        }
-
-        if (empty(config('magento.admin_pass'))) {
-            throw new \Exception('Magento token is missing. Set MAGENTO_ACCESS_TOKEN or MAGENTO_ADMIN_PASS.');
-        }
-
-        $this->token = $this->fetchAdminToken(
-            config('magento.base_url'),
-            config('magento.admin_user'),
-            config('magento.admin_pass'),
-        );
+        
+        // Token is empty, try to get it from vendor again
+        $this->token = $this->getTokenFromVendor($this->vendor);
     }
 
     /**
      * Make HTTP request to Magento API with automatic token refresh on 401
-     * 
-     * @param string $method - HTTP method (GET, POST, PUT, DELETE)
-     * @param string $endpoint - API endpoint (without /rest/V1/ prefix)
-     * @param array $data - Request payload or query parameters
-     * @return array
-     * @throws \Exception
-     */
-    // private function request(string $method, string $endpoint, array $data = []): array
-    // {
-    //     $url = "{$this->baseUrl}/rest/V1/{$endpoint}";
-
-    //     $response = match ($method) {
-    //         'GET' => $this->http()->get($url, $data),
-    //         'POST' => $this->http()->post($url, $data),
-    //         'PUT' => $this->http()->put($url, $data),
-    //         'DELETE' => $this->http()->delete($url),
-    //     };
-
-    //     // Token expired - refresh and retry once
-    //     if ($response->status() === 401 && $this->vendor) {
-    //         Log::warning("Magento token expired for vendor {$this->vendor->id}, refreshing...");
-    //         $this->token = $this->fetchAndSaveToken($this->vendor);
-
-    //         $response = match ($method) {
-    //             'GET' => $this->http()->get($url, $data),
-    //             'POST' => $this->http()->post($url, $data),
-    //             'PUT' => $this->http()->put($url, $data),
-    //             'DELETE' => $this->http()->delete($url),
-    //         };
-    //     }
-
-    //     if ($response->failed()) {
-    //         Log::error("Magento API [{$method} {$endpoint}]", [
-    //             'vendor_id' => $this->vendor?->id,
-    //             'status' => $response->status(),
-    //             'body' => $response->body(),
-    //         ]);
-    //         throw new \Exception("Magento [{$endpoint}] failed: " . $response->body());
-    //     }
-    //     Log::error($response);
-    //     $json = $response->json();
-
-    //     if (is_array($json)) {
-    //         return $json;
-    //     }
-    //     return ['success' => (bool) $json, 'value' => $json];
-    // }
-    /**
-     * Make HTTP request to Magento API with comprehensive logging
      */
     private function request(string $method, string $endpoint, array $data = []): array
     {
         $url = "{$this->baseUrl}/rest/V1/{$endpoint}";
 
-        // COMPLETE LOG - REQUEST
-        Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        Log::info('MAGENTO API CALL');
-        Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        Log::info('METHOD: ' . $method);
-        Log::info('ENDPOINT: ' . $endpoint);
-        Log::info('FULL URL: ' . $url);
-        Log::info('VENDOR ID: ' . ($this->vendor?->id ?? 'MANUAL'));
-        Log::info('PAYLOAD SENT: ', $data);
+        Log::info('MAGENTO API CALL', [
+            'method' => $method,
+            'endpoint' => $endpoint,
+            'vendor_id' => $this->vendor->id ?? 'unknown',
+        ]);
 
         $response = match ($method) {
             'GET' => $this->http()->get($url, $data),
@@ -251,22 +223,16 @@ class MagentoService
             'DELETE' => $this->http()->delete($url),
         };
 
-        // COMPLETE LOG - RESPONSE
-        Log::info('RESPONSE STATUS: ' . $response->status());
-        Log::info('RESPONSE BODY: ' . $response->body());
-        Log::info('RESPONSE HEADERS: ', $response->headers());
-
-        // Check if response is successful
-        if ($response->successful()) {
-            Log::info('✓ API CALL SUCCESSFUL');
-        } else {
-            Log::error('✗ API CALL FAILED');
-        }
-        Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        Log::info('MAGENTO API RESPONSE', [
+            'status' => $response->status(),
+            'success' => $response->successful(),
+        ]);
 
         // Token expired - refresh and retry once
         if ($response->status() === 401 && $this->vendor) {
-            Log::warning('⚠️ TOKEN EXPIRED - REFRESHING AND RETRYING');
+            Log::warning('Magento token expired, refreshing from vendor credentials...');
+            
+            // Refresh token using vendor's admin credentials
             $this->token = $this->fetchAndSaveToken($this->vendor);
 
             $response = match ($method) {
@@ -275,14 +241,18 @@ class MagentoService
                 'PUT' => $this->http()->put($url, $data),
                 'DELETE' => $this->http()->delete($url),
             };
-
-            Log::info('RETRY RESPONSE STATUS: ' . $response->status());
-            Log::info('RETRY RESPONSE BODY: ' . $response->body());
-            Log::info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
         }
 
         if ($response->failed()) {
-            throw new \Exception("Magento [{$endpoint}] failed with status {$response->status()}: " . $response->body());
+            throw new \Exception(
+                sprintf(
+                    'Magento [%s] failed for vendor %s with status %d: %s',
+                    $endpoint,
+                    $this->vendor->id ?? 'unknown',
+                    $response->status(),
+                    $response->body()
+                )
+            );
         }
 
         $json = $response->json();
@@ -293,794 +263,88 @@ class MagentoService
         return ['success' => (bool) $json, 'value' => $json];
     }
 
+    // ─────────────────────────────────────────────────────
+    // PUBLIC API METHODS
+    // ─────────────────────────────────────────────────────
 
-    /**
-     * GET request helper
-     */
-    // private function get(string $ep, array $q = []): array
-    public function get(string $ep, array $q = []): array
+    public function get(string $endpoint, array $query = []): array
     {
-        return $this->request('GET', $ep, $q);
+        return $this->request('GET', $endpoint, $query);
     }
 
-    /**
-     * POST request helper
-     */
-    // private function post(string $ep, array $b = []): array
-    public function post(string $ep, array $b = []): array
+    public function post(string $endpoint, array $body = []): array
     {
-        return $this->request('POST', $ep, $b);
+        return $this->request('POST', $endpoint, $body);
     }
 
-    /**
-     * PUT request helper
-     */
-    // private function put(string $ep, array $b = []): array
-    public function put(string $ep, array $b = []): array
+    public function put(string $endpoint, array $body = []): array
     {
-        return $this->request('PUT', $ep, $b);
+        return $this->request('PUT', $endpoint, $body);
     }
 
-    /**
-     * DELETE request helper
-     */
-    // private function delete(string $ep): array
-    public function delete(string $ep): array
+    public function delete(string $endpoint): array
     {
-        return $this->request('DELETE', $ep);
+        return $this->request('DELETE', $endpoint);
     }
 
     // ─────────────────────────────────────────────────────
-    // COUPON & SALES RULE MANAGEMENT (CART PRICE RULES)
+    // STORE MANAGEMENT (Global)
     // ─────────────────────────────────────────────────────
 
-    /**
-     * Create a new sales rule (cart price rule) in Magento
-     * POST /rest/V1/salesRules
-     * 
-     * @param array $ruleData - Sales rule data structure
-     * @return array - Created rule data with rule_id
-     * @throws \Exception
-     * 
-     * Expected $ruleData structure:
-     * [
-     *     'rule' => [
-     *         'name' => 'Coupon Code',
-     *         'description' => 'Description here',
-     *         'is_active' => true,
-     *         'uses_per_customer' => 1,
-     *         'uses_per_coupon' => 100,
-     *         'discount_amount' => 10.00,
-     *         'simple_action' => 'by_percent', // or 'cart_fixed', 'buy_x_get_y'
-     *         'coupon_type' => 2, // 1=No coupon, 2=Specific coupon, 3=Auto generation
-     *         'use_auto_generation' => false,
-     *         'website_ids' => [1],
-     *         'customer_group_ids' => [0,1,2,3],
-     *         'from_date' => '2024-01-01',
-     *         'to_date' => '2024-12-31',
-     *     ]
-     * ]
-     */
-    public function createSalesRule(array $ruleData): array
-    {
-        return $this->post('salesRules', $ruleData);
-    }
-
-    /**
-     * Update an existing sales rule in Magento
-     * PUT /rest/V1/salesRules/{ruleId}
-     * 
-     * @param int $ruleId - Magento rule ID
-     * @param array $ruleData - Updated rule data (only fields to update)
-     * @return array - Updated rule data
-     * @throws \Exception
-     */
-    public function updateSalesRule(int $ruleId, array $ruleData): array
-    {
-        // Ensure rule_id is included in payload for PUT request
-        if (!isset($ruleData['rule']['rule_id'])) {
-            $ruleData['rule']['rule_id'] = $ruleId;
-        }
-
-        return $this->put('salesRules/' . $ruleId, $ruleData);
-    }
-
-    /**
-     * Delete a sales rule from Magento
-     * DELETE /rest/V1/salesRules/{ruleId}
-     * 
-     * @param int $ruleId - Magento rule ID
-     * @return array - Response data
-     * @throws \Exception
-     */
-    public function deleteSalesRule(int $ruleId): array
-    {
-        return $this->delete('salesRules/' . $ruleId);
-    }
-
-    /**
-     * Get a sales rule by ID
-     * GET /rest/V1/salesRules/{ruleId}
-     * 
-     * @param int $ruleId - Magento rule ID
-     * @return array - Rule data
-     * @throws \Exception
-     */
-    public function getSalesRule(int $ruleId): array
-    {
-        return $this->get('salesRules/' . $ruleId);
-    }
-
-    /**
-     * Search sales rules with filters
-     * GET /rest/V1/salesRules/search
-     * 
-     * @param array $criteria - Search criteria (filters, page size, etc.)
-     * @return array - List of matching rules
-     * @throws \Exception
-     */
-    public function searchSalesRules(array $criteria = []): array
-    {
-        $query = [];
-
-        if (!empty($criteria['name'])) {
-            $query['searchCriteria[filter_groups][0][filters][0][field]'] = 'name';
-            $query['searchCriteria[filter_groups][0][filters][0][value]'] = $criteria['name'];
-            $query['searchCriteria[filter_groups][0][filters][0][condition_type]'] = 'like';
-        }
-
-        if (!empty($criteria['is_active'])) {
-            $query['searchCriteria[filter_groups][1][filters][0][field]'] = 'is_active';
-            $query['searchCriteria[filter_groups][1][filters][0][value]'] = $criteria['is_active'] ? '1' : '0';
-            $query['searchCriteria[filter_groups][1][filters][0][condition_type]'] = 'eq';
-        }
-
-        if (!empty($criteria['page_size'])) {
-            $query['searchCriteria[pageSize]'] = $criteria['page_size'];
-        }
-
-        if (!empty($criteria['current_page'])) {
-            $query['searchCriteria[currentPage]'] = $criteria['current_page'];
-        }
-
-        return $this->get('salesRules/search', $query);
-    }
-
-    /**
-     * Update only the status of a sales rule
-     * Convenience method for toggling active/inactive
-     * 
-     * @param int $ruleId - Magento rule ID
-     * @param bool $isActive - Active status
-     * @return array - Updated rule data
-     * @throws \Exception
-     */
-    public function updateSalesRuleStatus(int $ruleId, bool $isActive): array
-    {
-        return $this->updateSalesRule($ruleId, [
-            'rule' => [
-                'rule_id' => $ruleId,
-                'is_active' => $isActive,
-            ]
-        ]);
-    }
-
-    /**
-     * Create a coupon code for a sales rule
-     * POST /rest/V1/coupons
-     * 
-     * @param int $ruleId - Parent sales rule ID
-     * @param string $couponCode - Unique coupon code
-     * @param int|null $usageLimit - Maximum uses for this coupon (null = unlimited)
-     * @param int|null $usagePerCustomer - Maximum uses per customer (null = unlimited)
-     * @return array - Created coupon data with coupon_id
-     * @throws \Exception
-     * 
-     * Note: Use this for specific coupons. For auto-generated coupons,
-     * set use_auto_generation=true in sales rule instead.
-     */
-    public function createCoupon(int $ruleId, string $couponCode, ?int $usageLimit = null, ?int $usagePerCustomer = null): array
-    {
-        $couponData = [
-            'coupon' => [
-                'rule_id' => $ruleId,
-                'code' => $couponCode,
-                'usage_limit' => $usageLimit ?? 0, // 0 = unlimited
-                'usage_per_customer' => $usagePerCustomer ?? 0,
-                'times_used' => 0,
-                'is_primary' => true, // Primary coupon for the rule
-            ]
-        ];
-
-        return $this->post('coupons', $couponData);
-    }
-
-    /**
-     * Update an existing coupon
-     * PUT /rest/V1/coupons/{couponId}
-     * 
-     * @param int $couponId - Magento coupon ID
-     * @param array $couponData - Updated coupon data
-     * @return array - Updated coupon data
-     * @throws \Exception
-     */
-    public function updateCoupon(int $couponId, array $couponData): array
-    {
-        if (!isset($couponData['coupon']['coupon_id'])) {
-            $couponData['coupon']['coupon_id'] = $couponId;
-        }
-
-        return $this->put('coupons/' . $couponId, $couponData);
-    }
-
-    /**
-     * Delete a coupon from Magento
-     * DELETE /rest/V1/coupons/{couponId}
-     * 
-     * @param int $couponId - Magento coupon ID
-     * @return array - Response data
-     * @throws \Exception
-     */
-    public function deleteCoupon(int $couponId): array
-    {
-        return $this->delete('coupons/' . $couponId);
-    }
-
-    /**
-     * Get a coupon by ID
-     * GET /rest/V1/coupons/{couponId}
-     * 
-     * @param int $couponId - Magento coupon ID
-     * @return array - Coupon data
-     * @throws \Exception
-     */
-    public function getCoupon(int $couponId): array
-    {
-        return $this->get('coupons/' . $couponId);
-    }
-
-    /**
-     * Search coupons with filters
-     * GET /rest/V1/coupons/search
-     * 
-     * @param array $criteria - Search criteria
-     * @return array - List of matching coupons
-     * @throws \Exception
-     * 
-     * Available filters:
-     * - rule_id: Filter by parent sales rule ID
-     * - code: Filter by coupon code (exact match)
-     * - coupon_id: Filter by coupon ID
-     * - times_used: Filter by usage count
-     */
-    public function searchCoupons(array $criteria = []): array
-    {
-        $query = [];
-        $filterIndex = 0;
-
-        // Filter by rule_id
-        if (!empty($criteria['rule_id'])) {
-            $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][field]"] = 'rule_id';
-            $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][value]"] = $criteria['rule_id'];
-            $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][condition_type]"] = 'eq';
-            $filterIndex++;
-        }
-
-        // Filter by coupon code
-        if (!empty($criteria['code'])) {
-            $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][field]"] = 'code';
-            $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][value]"] = $criteria['code'];
-            $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][condition_type]"] = 'eq';
-            $filterIndex++;
-        }
-
-        // Filter by usage count range
-        if (isset($criteria['min_uses'])) {
-            $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][field]"] = 'times_used';
-            $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][value]"] = $criteria['min_uses'];
-            $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][condition_type]"] = 'gteq';
-            $filterIndex++;
-        }
-
-        if (isset($criteria['max_uses'])) {
-            $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][field]"] = 'times_used';
-            $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][value]"] = $criteria['max_uses'];
-            $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][condition_type]"] = 'lteq';
-            $filterIndex++;
-        }
-
-        // Pagination
-        if (!empty($criteria['page_size'])) {
-            $query['searchCriteria[pageSize]'] = $criteria['page_size'];
-        }
-
-        if (!empty($criteria['current_page'])) {
-            $query['searchCriteria[currentPage]'] = $criteria['current_page'];
-        }
-
-        // Sorting
-        if (!empty($criteria['sort_field'])) {
-            $query['searchCriteria[sortOrders][0][field]'] = $criteria['sort_field'];
-            $query['searchCriteria[sortOrders][0][direction]'] = $criteria['sort_direction'] ?? 'DESC';
-        }
-
-        return $this->get('coupons/search', $query);
-    }
-
-    /**
-     * Get coupon by code (convenience method)
-     * Uses search API to find coupon by exact code
-     * 
-     * @param string $couponCode
-     * @return array|null - Coupon data or null if not found
-     * @throws \Exception
-     */
-    public function getCouponByCode(string $couponCode): ?array
-    {
-        $result = $this->searchCoupons(['code' => $couponCode]);
-        $items = $result['items'] ?? [];
-
-        return !empty($items) ? $items[0] : null;
-    }
-
-    /**
-     * Generate multiple coupon codes for a sales rule (auto-generation)
-     * This requires the sales rule to have use_auto_generation = true
-     * POST /rest/V1/coupons/generate
-     * 
-     * @param int $ruleId - Parent sales rule ID
-     * @param int $quantity - Number of coupons to generate
-     * @param int $length - Length of coupon code
-     * @param string $format - Format (alphanum, alpha, num)
-     * @param string|null $prefix - Optional prefix
-     * @param string|null $suffix - Optional suffix
-     * @return array - Generated coupon list
-     * @throws \Exception
-     */
-    public function generateCoupons(int $ruleId, int $quantity, int $length = 12, string $format = 'alphanum', ?string $prefix = null, ?string $suffix = null): array
-    {
-        $data = [
-            'coupon' => [
-                'rule_id' => $ruleId,
-                'qty' => $quantity,
-                'length' => $length,
-                'format' => $format,
-                'prefix' => $prefix,
-                'suffix' => $suffix,
-            ]
-        ];
-
-        return $this->post('coupons/generate', $data);
-    }
-
-    // ─────────────────────────────────────────────────────
-    // VENDOR STORE MANAGEMENT
-    // ─────────────────────────────────────────────────────
-
-    /**
-     * Create complete vendor store structure (Website, Store Group, Root Category)
-     * 
-     * @param Vendor $vendor
-     * @return array
-     * @throws \Exception
-     */
-    public function createVendorStore(Vendor $vendor): array
-    {
-        // Step 1: Create website
-        $website = $this->post('store/websites', [
-            'website' => [
-                'code' => 'vendor_' . $vendor->id . '_' . time(),
-                'name' => $vendor->company_name,
-                'default_group_id' => 0,
-                'is_default' => false,
-            ]
-        ]);
-
-        $websiteId = $website['id'] ?? null;
-        if (!$websiteId) {
-            throw new \Exception('Website creation failed: ' . json_encode($website));
-        }
-
-        // Step 2: Create root category for the store
-        $category = $this->post('categories', [
-            'category' => [
-                'parent_id' => 2, // Default Root Category
-                'name' => $vendor->company_name,
-                'is_active' => true,
-                'include_in_menu' => false,
-            ]
-        ]);
-
-        $rootCategoryId = $category['id'] ?? 2;
-
-        // Step 3: Create store group
-        $storeGroup = $this->post('store/storeGroups', [
-            'storeGroup' => [
-                'website_id' => $websiteId,
-                'name' => $vendor->company_name,
-                'code' => 'vendor_group_' . $vendor->id,
-                'root_category_id' => $rootCategoryId,
-            ]
-        ]);
-
-        // Step 4: Update vendor with Magento IDs
-        $vendor->update([
-            'magento_website_id' => $websiteId,
-            'magento_store_group_id' => $storeGroup['id'] ?? null,
-            'magento_root_category_id' => $rootCategoryId,
-            'magento_synced_at' => now(),
-        ]);
-
-        return [
-            'website_id' => $websiteId,
-            'store_group_id' => $storeGroup['id'] ?? null,
-            'root_category_id' => $rootCategoryId,
-        ];
-    }
-
-    /**
-     * Create store group from data
-     * 
-     * @param Vendor $vendor
-     * @param array $data
-     * @return array
-     * @throws \Exception
-     */
-    public function createStoreGroupFromData(Vendor $vendor, array $data): array
-    {
-        if (empty($vendor->magento_website_id)) {
-            throw new \Exception('Magento website ID is not configured for vendor ID: ' . $vendor->id);
-        }
-
-        $response = $this->post('store/storeGroups', [
-            'storeGroup' => [
-                'website_id' => (int) $vendor->magento_website_id,
-                'name' => $data['store_name'],
-                'code' => $this->storeGroupCodeFromData($data),
-                'root_category_id' => (int) ($data['magento_root_category_id'] ?? $vendor->magento_root_category_id ?? 2),
-            ],
-        ]);
-
-        $storeGroupId = $response['id'] ?? $response['value'] ?? null;
-
-        return [
-            'store_id' => $storeGroupId,
-            'store_group_id' => $storeGroupId,
-            'website_id' => $vendor->magento_website_id,
-            'root_category_id' => $data['magento_root_category_id'] ?? $vendor->magento_root_category_id ?? 2,
-            'response' => $response,
-            'magento_entity' => 'store_group',
-        ];
-    }
-
-    /**
-     * Update store group
-     * 
-     * @param VendorStore $store
-     * @return array
-     * @throws \Exception
-     */
-    public function updateStoreGroup(VendorStore $store): array
-    {
-        $storeGroupId = $store->magento_store_group_id ?: $store->magento_store_id;
-
-        if (empty($storeGroupId)) {
-            throw new \Exception('Magento store group ID is missing for this store.');
-        }
-
-        $response = $this->put('store/storeGroups/' . $storeGroupId, [
-            'storeGroup' => [
-                'id' => (int) $storeGroupId,
-                'website_id' => (int) $store->magento_website_id,
-                'name' => $store->store_name,
-                'code' => $this->storeGroupCodeFromData([
-                    'store_slug' => $store->store_slug,
-                    'store_name' => $store->store_name,
-                ]),
-                'root_category_id' => (int) data_get($store->metadata, 'magento.root_category_id', $store->vendor->magento_root_category_id ?? 2),
-            ],
-        ]);
-
-        return [
-            'store_id' => $storeGroupId,
-            'store_group_id' => $storeGroupId,
-            'website_id' => $store->magento_website_id,
-            'response' => $response,
-            'magento_entity' => 'store_group',
-        ];
-    }
-
-    /**
-     * Delete store group
-     * 
-     * @param VendorStore $store
-     * @return array
-     */
-    public function deleteStoreGroup(VendorStore $store): array
-    {
-        $storeGroupId = $store->magento_store_group_id ?: $store->magento_store_id;
-
-        if (empty($storeGroupId)) {
-            return ['success' => true, 'skipped' => true, 'reason' => 'missing_magento_store_group_id'];
-        }
-
-        return $this->deleteStoreGroupById((int) $storeGroupId);
-    }
-
-    /**
-     * Delete store group by ID
-     * 
-     * @param int $storeGroupId
-     * @return array
-     */
-    public function deleteStoreGroupById(int $storeGroupId): array
-    {
-        $response = $this->delete('store/storeGroups/' . $storeGroupId);
-
-        return [
-            'success' => true,
-            'store_group_id' => $storeGroupId,
-            'response' => $response,
-            'magento_entity' => 'store_group',
-        ];
-    }
-
-    /**
-     * Create store view
-     * 
-     * @param Vendor $vendor
-     * @param VendorStore $store
-     * @return array
-     */
-    public function createStoreView(Vendor $vendor, VendorStore $store): array
-    {
-        return $this->createStoreViewFromData($vendor, [
-            'store_name' => $store->store_name,
-            'store_slug' => $store->store_slug,
-            'status' => $store->status,
-        ]);
-    }
-
-    /**
-     * Create store view from data
-     * 
-     * @param Vendor $vendor
-     * @param array $data
-     * @return array
-     * @throws \Exception
-     */
-    public function createStoreViewFromData(Vendor $vendor, array $data): array
-    {
-        if (empty($vendor->magento_website_id) || empty($vendor->magento_store_group_id)) {
-            throw new \Exception('Magento website/store group is not configured for vendor ID: ' . $vendor->id);
-        }
-
-        $response = $this->post('store/storeViews', [
-            'storeView' => [
-                'code' => $this->storeViewCodeFromData($data),
-                'name' => $data['store_name'],
-                'website_id' => $vendor->magento_website_id,
-                'store_group_id' => $vendor->magento_store_group_id,
-                'is_active' => ($data['status'] ?? 'inactive') === 'active',
-            ]
-        ]);
-
-        return [
-            'store_id' => $response['id'] ?? $response['value'] ?? null,
-            'store_group_id' => $vendor->magento_store_group_id,
-            'website_id' => $vendor->magento_website_id,
-            'response' => $response,
-        ];
-    }
-
-    /**
-     * Update store view
-     * 
-     * @param VendorStore $store
-     * @return array
-     * @throws \Exception
-     */
-    public function updateStoreView(VendorStore $store): array
-    {
-        if (empty($store->magento_store_id)) {
-            throw new \Exception('Magento store ID is missing for this store.');
-        }
-
-        return $this->put('store/storeViews/' . $store->magento_store_id, [
-            'storeView' => [
-                'id' => (int) $store->magento_store_id,
-                'code' => $this->storeViewCode($store),
-                'name' => $store->store_name,
-                'website_id' => (int) $store->magento_website_id,
-                'store_group_id' => (int) $store->magento_store_group_id,
-                'is_active' => $store->status === 'active',
-            ],
-        ]);
-    }
-
-    /**
-     * Delete store view
-     * 
-     * @param VendorStore $store
-     * @return array
-     */
-    public function deleteStoreView(VendorStore $store): array
-    {
-        if (empty($store->magento_store_id)) {
-            return ['success' => true, 'skipped' => true, 'reason' => 'missing_magento_store_id'];
-        }
-
-        return $this->deleteStoreViewById((int) $store->magento_store_id);
-    }
-
-    /**
-     * Delete store view by ID
-     * 
-     * @param int $magentoStoreId
-     * @return array
-     * @throws \Exception
-     */
-    public function deleteStoreViewById(int $magentoStoreId): array
-    {
-        try {
-            return $this->delete('store/storeViews/' . $magentoStoreId);
-        } catch (\Throwable $e) {
-            Log::warning('Magento store view delete failed; deactivating instead', [
-                'magento_store_id' => $magentoStoreId,
-                'error' => $e->getMessage(),
-            ]);
-
-            throw $e;
-        }
-    }
-
-    /**
-     * Get all store views
-     * 
-     * @return array
-     */
     public function getStoreViews(): array
     {
         return $this->get('store/storeViews');
     }
 
-    /**
-     * Get all store groups
-     * 
-     * @return array
-     */
     public function getStoreGroups(): array
     {
         return $this->get('store/storeGroups');
     }
 
-    /**
-     * Get all websites
-     * 
-     * @return array
-     */
     public function getWebsites(): array
     {
         return $this->get('store/websites');
     }
 
-    // ─────────────────────────────────────────────────────
-    // PRODUCT MANAGEMENT
-    // ─────────────────────────────────────────────────────
-
-    /**
-     * Get products with pagination
-     * 
-     * @param int $page
-     * @param int $size
-     * @return array
-     */
-    public function getProducts(int $page = 1, int $size = 20): array
+    public function createWebsite(array $data): array
     {
-        return $this->get('products', [
-            'searchCriteria[currentPage]' => $page,
-            'searchCriteria[pageSize]' => $size,
-        ]);
+        return $this->post('store/websites', $data);
     }
 
-    /**
-     * Get product by SKU
-     * 
-     * @param string $sku
-     * @return array
-     */
-    public function getProductBySku(string $sku): array
+    public function createStoreGroup(array $data): array
     {
-        return $this->get('products/' . rawurlencode($sku));
+        return $this->post('store/storeGroups', $data);
     }
 
-    /**
-     * Create product
-     * 
-     * @param array $data
-     * @return array
-     */
-    public function createProduct(array $data): array
+    public function updateStoreGroup(int $groupId, array $data): array
     {
-        return $this->post('products', ['product' => $data]);
+        return $this->put('store/storeGroups/' . $groupId, $data);
     }
 
-    /**
-     * Update product
-     * 
-     * @param string $sku
-     * @param array $data
-     * @return array
-     */
-    public function updateProduct(string $sku, array $data): array
+    public function deleteStoreGroup(int $groupId): array
     {
-        return $this->put('products/' . rawurlencode($sku), ['product' => $data]);
+        return $this->delete('store/storeGroups/' . $groupId);
     }
 
-    /**
-     * Delete product
-     * 
-     * @param string $sku
-     * @return array
-     */
-    public function deleteProduct(string $sku): array
+    public function createStoreView(array $data): array
     {
-        return $this->delete('products/' . rawurlencode($sku));
+        return $this->post('store/storeViews', $data);
     }
 
-    /**
-     * Create or update product (upsert)
-     * 
-     * @param ProductDraft|VendorProduct $product
-     * @return array
-     */
-    public function createOrUpdateProduct(ProductDraft|VendorProduct $product): array
+    public function updateStoreView(int $storeViewId, array $data): array
     {
-        $payload = $this->buildProductPayload($product);
-
-        if (!empty($product->magento_product_id) || !empty($product->magento_sku)) {
-            return $this->updateProduct($product->magento_sku ?: $product->sku, $payload);
-        }
-
-        return $this->createProduct($payload);
+        return $this->put('store/storeViews/' . $storeViewId, $data);
     }
 
-    /**
-     * Sync stock for product
-     * 
-     * @param ProductDraft|VendorProduct $product
-     * @return array
-     */
-    public function syncStockForProduct(ProductDraft|VendorProduct $product): array
+    public function deleteStoreView(int $storeViewId): array
     {
-        return $this->updateStock($product->magento_sku ?: $product->sku, (int) ($product->quantity ?? 0));
-    }
-
-    /**
-     * Update stock for product
-     * 
-     * @param string $sku
-     * @param int $qty
-     * @return array
-     */
-    public function updateStock(string $sku, int $qty): array
-    {
-        return $this->put('products/' . rawurlencode($sku) . '/stockItems/1', [
-            'stockItem' => ['qty' => $qty, 'is_in_stock' => $qty > 0]
-        ]);
+        return $this->delete('store/storeViews/' . $storeViewId);
     }
 
     // ─────────────────────────────────────────────────────
-    // ORDER MANAGEMENT
+    // ORDER MANAGEMENT (Global)
     // ─────────────────────────────────────────────────────
 
-    /**
-     * Get orders with pagination
-     * 
-     * @param int $page
-     * @param int $size
-     * @return array
-     */
     public function getOrders(int $page = 1, int $size = 20): array
     {
         return $this->get('orders', [
@@ -1091,17 +355,15 @@ class MagentoService
         ]);
     }
 
+    public function getOrder(int $orderId): array
+    {
+        return $this->get('orders/' . $orderId);
+    }
+
     // ─────────────────────────────────────────────────────
-    // CUSTOMER MANAGEMENT
+    // CUSTOMER MANAGEMENT (Global)
     // ─────────────────────────────────────────────────────
 
-    /**
-     * Get customers with pagination
-     * 
-     * @param int $page
-     * @param int $size
-     * @return array
-     */
     public function getCustomers(int $page = 1, int $size = 50): array
     {
         return $this->get('customers/search', [
@@ -1110,107 +372,50 @@ class MagentoService
         ]);
     }
 
+    public function getCustomer(int $customerId): array
+    {
+        return $this->get('customers/' . $customerId);
+    }
+
     // ─────────────────────────────────────────────────────
-    // CATEGORY MANAGEMENT
+    // CATEGORY MANAGEMENT (Global)
     // ─────────────────────────────────────────────────────
 
-    /**
-     * Get all categories
-     * 
-     * @param array $params - Query parameters (storeId, parentId, etc.)
-     * @return array
-     */
     public function getCategories(array $params = []): array
     {
         return $this->get('categories', $params);
     }
 
-    /**
-     * Get single category by ID
-     * 
-     * @param int $categoryId
-     * @return array
-     */
     public function getCategory(int $categoryId): array
     {
         return $this->get('categories/' . $categoryId);
     }
 
-    /**
-     * Create new category
-     * 
-     * @param array $categoryData
-     * @return array
-     */
     public function createCategory(array $categoryData): array
     {
         return $this->post('categories', $categoryData);
     }
 
-    /**
-     * Update existing category
-     * PUT /rest/V1/categories/{categoryId}
-     * 
-     * @param int $categoryId
-     * @param array $categoryData
-     * @return array
-     */
     public function updateCategory(int $categoryId, array $categoryData): array
     {
-        // Ensure ID is in the payload
         if (!isset($categoryData['category']['id'])) {
             $categoryData['category']['id'] = $categoryId;
         }
 
-        // Remove any fields that might cause issues
         unset($categoryData['category']['level']);
         unset($categoryData['category']['path']);
         unset($categoryData['category']['children']);
         unset($categoryData['category']['created_at']);
         unset($categoryData['category']['updated_at']);
-        unset($categoryData['category']['default_sort_by']);
-        unset($categoryData['category']['available_sort_by']);
 
         return $this->put('categories/' . $categoryId, $categoryData);
     }
-    /**
-     * Update category with store ID scope
-     */
-    public function updateCategoryWithStore(int $categoryId, array $categoryData, int $storeId = 0): array
-    {
-        return $this->put('categories/' . $categoryId . '?storeId=' . $storeId, $categoryData);
-    }
-    /**
-     * Delete category
-     * DELETE /rest/V1/categories/{categoryId}
-     * 
-     * @param int $categoryId
-     * @return array
-     */
+
     public function deleteCategory(int $categoryId): array
     {
-        try {
-            return $this->delete('categories/' . $categoryId);
-        } catch (\Exception $e) {
-            // Magento returns 200 OK on successful delete, but check for specific errors
-            if (str_contains($e->getMessage(), '404')) {
-                throw new \Exception('Category not found in Magento with ID: ' . $categoryId);
-            }
-            if (str_contains($e->getMessage(), 'Cannot delete root category')) {
-                throw new \Exception('Cannot delete root category in Magento');
-            }
-            throw $e;
-        }
+        return $this->delete('categories/' . $categoryId);
     }
 
-    /**
-     * Get category tree
-     * 
-     * @param int|null $rootCategoryId
-     * @param int|null $storeId
-     * @param int $depth
-     * @return array
-     */
     public function getCategoryTree(?int $rootCategoryId = null, ?int $storeId = null, int $depth = 5): array
     {
         $params = ['depth' => $depth];
@@ -1226,235 +431,120 @@ class MagentoService
         return $this->get('categories', $params);
     }
 
-    /**
-     * Get category products
-     * 
-     * @param int $categoryId
-     * @param int $page
-     * @param int $pageSize
-     * @param string|null $sortField
-     * @param string|null $sortOrder
-     * @return array
-     */
-    public function getCategoryProducts(int $categoryId, int $page = 1, int $pageSize = 20, ?string $sortField = null, ?string $sortOrder = 'DESC'): array
-    {
-        $filters = [
-            'searchCriteria[filterGroups][0][filters][0][field]' => 'category_id',
-            'searchCriteria[filterGroups][0][filters][0][value]' => $categoryId,
-            'searchCriteria[filterGroups][0][filters][0][conditionType]' => 'eq',
-            'searchCriteria[pageSize]' => $pageSize,
-            'searchCriteria[currentPage]' => $page,
-        ];
-
-        if ($sortField) {
-            $filters['searchCriteria[sortOrders][0][field]'] = $sortField;
-            $filters['searchCriteria[sortOrders][0][direction]'] = $sortOrder;
-        }
-
-        return $this->get('products', $filters);
-    }
-
     // ─────────────────────────────────────────────────────
-    // PRIVATE HELPER METHODS
+    // COUPON & SALES RULE MANAGEMENT (Global)
     // ─────────────────────────────────────────────────────
 
-    /**
-     * Generate store view code from store data
-     * 
-     * @param VendorStore $store
-     * @return string
-     */
-    private function storeViewCode(VendorStore $store): string
+    public function createSalesRule(array $ruleData): array
     {
-        return $this->storeViewCodeFromData([
-            'store_slug' => $store->store_slug,
-            'store_name' => $store->store_name,
-        ]);
+        return $this->post('salesRules', $ruleData);
     }
 
-    /**
-     * Generate store view code from data array
-     * 
-     * @param array $data
-     * @return string
-     */
-    private function storeViewCodeFromData(array $data): string
+    public function updateSalesRule(int $ruleId, array $ruleData): array
     {
-        $source = $data['store_slug'] ?? $data['store_name'] ?? 'store';
-        $slug = preg_replace('/[^a-z0-9_]+/', '_', strtolower($source));
-        $slug = trim($slug ?: 'store', '_');
-
-        return 'store_' . $slug . '_' . substr(md5($slug), 0, 8);
-    }
-
-    /**
-     * Generate store group code from data array
-     * 
-     * @param array $data
-     * @return string
-     */
-    private function storeGroupCodeFromData(array $data): string
-    {
-        $source = $data['store_slug'] ?? $data['store_name'] ?? 'store';
-        $slug = preg_replace('/[^a-z0-9_]+/', '_', strtolower($source));
-        $slug = trim($slug ?: 'store', '_');
-
-        return 'store_' . $slug . '_' . substr(md5($slug), 0, 8);
-    }
-
-    /**
-     * Build product payload for Magento API
-     * 
-     * @param ProductDraft|VendorProduct $product
-     * @return array
-     */
-    private function buildProductPayload(ProductDraft|VendorProduct $product): array
-    {
-        $attributes = is_array($product->attributes ?? null) ? $product->attributes : [];
-
-        $requestedStatus = $product instanceof ProductDraft
-            ? data_get($product->product_data, 'status', 'active')
-            : ($product->status ?? 'active');
-
-        // Base custom attributes (description and short_description are always plain strings)
-        $customAttributes = [
-            ['attribute_code' => 'description', 'value' => $product->description ?? $attributes['description'] ?? ''],
-            ['attribute_code' => 'short_description', 'value' => $product->short_description ?? $attributes['short_description'] ?? ''],
-        ];
-
-        // Skip codes that are already handled
-        $skipCodes = ['description', 'short_description'];
-
-        foreach ($attributes as $code => $value) {
-            if (in_array($code, $skipCodes, true)) {
-                continue;
-            }
-
-            if (is_array($value)) {
-                // Multi-select or array value — resolve each label to an option ID
-                $resolvedValues = array_map(
-                    fn($v) => is_int($v) || ctype_digit((string) $v)
-                        ? (int) $v
-                        : $this->resolveOptionId($code, $v),
-                    $value
-                );
-
-                $customAttributes[] = [
-                    'attribute_code' => $code,
-                    'value' => implode(',', $resolvedValues), // Magento multi-select format
-                ];
-
-                continue;
-            }
-
-            // Single value — resolve if string, pass through if already an int
-            $resolvedValue = is_int($value) || ctype_digit((string) $value)
-                ? (int) $value
-                : $this->tryResolveOptionId($code, $value);
-
-            $customAttributes[] = [
-                'attribute_code' => $code,
-                'value' => $resolvedValue,
-            ];
+        if (!isset($ruleData['rule']['rule_id'])) {
+            $ruleData['rule']['rule_id'] = $ruleId;
         }
 
-        // Add category IDs if present
-        if (!empty($product->categories) && is_array($product->categories)) {
-            $customAttributes[] = [
-                'attribute_code' => 'category_ids',
-                'value' => array_values($product->categories),
-            ];
-        }
-
-        return [
-            'sku' => $product->sku,
-            'name' => $product->name,
-            'attribute_set_id' => (int) ($product->attribute_set_id ?? 4),
-            'price' => (float) ($product->price ?? 0),
-            'status' => $requestedStatus === 'inactive' ? 2 : 1, // 1=Enabled, 2=Disabled
-            'visibility' => 4, // 4=Catalog, Search
-            'type_id' => $product->type_id ?? 'simple',
-            'weight' => (float) ($product->weight ?? 0),
-            'extension_attributes' => [
-                'stock_item' => [
-                    'qty' => (int) ($product->quantity ?? 0),
-                    'is_in_stock' => (int) ($product->quantity ?? 0) > 0,
-                ],
-            ],
-            'custom_attributes' => $customAttributes,
-        ];
+        return $this->put('salesRules/' . $ruleId, $ruleData);
     }
 
-    /**
-     * Resolve a string label to its Magento option ID.
-     * Throws if no match found — hard fail so bad data doesn't silently go through.
-     * Results are cached per attribute code for 24 hours to avoid hammering Magento.
-     * 
-     * @param string $attributeCode
-     * @param string $label
-     * @return int
-     * @throws \RuntimeException
-     */
-    private function resolveOptionId(string $attributeCode, string $label): int
+    public function deleteSalesRule(int $ruleId): array
     {
-        $options = \Illuminate\Support\Facades\Cache::remember(
-            "magento_attr_opts_{$attributeCode}",
-            now()->addHours(24),
-            fn() => $this->get("products/attributes/{$attributeCode}/options")
-        );
-
-        $match = collect($options)->first(
-            fn($opt) => strtolower(trim($opt['label'])) === strtolower(trim($label))
-        );
-
-        if (!$match) {
-            $available = collect($options)
-                ->filter(fn($o) => $o['value'] !== '') // exclude the empty "Choose an option" entry
-                ->pluck('label')
-                ->implode(', ');
-
-            throw new \RuntimeException(
-                "Magento attribute '{$attributeCode}': no option found for '{$label}'. " .
-                    "Available options: {$available}"
-            );
-        }
-
-        return (int) $match['value'];
+        return $this->delete('salesRules/' . $ruleId);
     }
 
-    /**
-     * Like resolveOptionId but falls back to the raw string value when the
-     * attribute has no options (i.e. it's a text/textarea field, not a select).
-     * This prevents crashing on free-text attributes like 'brand', 'material', etc.
-     * 
-     * @param string $attributeCode
-     * @param string $value
-     * @return int|string
-     */
-    private function tryResolveOptionId(string $attributeCode, string $value): int|string
+    public function getSalesRule(int $ruleId): array
     {
-        try {
-            $options = \Illuminate\Support\Facades\Cache::remember(
-                "magento_attr_opts_{$attributeCode}",
-                now()->addHours(24),
-                fn() => $this->get("products/attributes/{$attributeCode}/options")
-            );
+        return $this->get('salesRules/' . $ruleId);
+    }
 
-            // Empty or single-entry response means it's a text field, not a select
-            $filteredOptions = collect($options)->filter(fn($o) => $o['value'] !== '');
+    public function searchSalesRules(array $criteria = []): array
+    {
+        $query = [];
+        $filterIndex = 0;
 
-            if ($filteredOptions->isEmpty()) {
-                return $value; // free-text attribute — pass as-is
-            }
-
-            $match = $filteredOptions->first(
-                fn($opt) => strtolower(trim($opt['label'])) === strtolower(trim($value))
-            );
-
-            return $match ? (int) $match['value'] : $value;
-        } catch (\Throwable) {
-            // Attribute fetch failed (e.g. attribute doesn't exist in this set) — pass raw
-            return $value;
+        if (!empty($criteria['name'])) {
+            $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][field]"] = 'name';
+            $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][value]"] = $criteria['name'];
+            $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][condition_type]"] = 'like';
+            $filterIndex++;
         }
+
+        if (!empty($criteria['is_active'])) {
+            $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][field]"] = 'is_active';
+            $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][value]"] = $criteria['is_active'] ? '1' : '0';
+            $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][condition_type]"] = 'eq';
+            $filterIndex++;
+        }
+
+        if (!empty($criteria['page_size'])) {
+            $query['searchCriteria[pageSize]'] = $criteria['page_size'];
+        }
+
+        if (!empty($criteria['current_page'])) {
+            $query['searchCriteria[currentPage]'] = $criteria['current_page'];
+        }
+
+        return $this->get('salesRules/search', $query);
+    }
+
+    public function createCoupon(array $couponData): array
+    {
+        return $this->post('coupons', $couponData);
+    }
+
+    public function updateCoupon(int $couponId, array $couponData): array
+    {
+        if (!isset($couponData['coupon']['coupon_id'])) {
+            $couponData['coupon']['coupon_id'] = $couponId;
+        }
+
+        return $this->put('coupons/' . $couponId, $couponData);
+    }
+
+    public function deleteCoupon(int $couponId): array
+    {
+        return $this->delete('coupons/' . $couponId);
+    }
+
+    public function getCoupon(int $couponId): array
+    {
+        return $this->get('coupons/' . $couponId);
+    }
+
+    public function searchCoupons(array $criteria = []): array
+    {
+        $query = [];
+        $filterIndex = 0;
+
+        if (!empty($criteria['rule_id'])) {
+            $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][field]"] = 'rule_id';
+            $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][value]"] = $criteria['rule_id'];
+            $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][condition_type]"] = 'eq';
+            $filterIndex++;
+        }
+
+        if (!empty($criteria['code'])) {
+            $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][field]"] = 'code';
+            $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][value]"] = $criteria['code'];
+            $query["searchCriteria[filter_groups][{$filterIndex}][filters][0][condition_type]"] = 'eq';
+            $filterIndex++;
+        }
+
+        if (!empty($criteria['page_size'])) {
+            $query['searchCriteria[pageSize]'] = $criteria['page_size'];
+        }
+
+        if (!empty($criteria['current_page'])) {
+            $query['searchCriteria[currentPage]'] = $criteria['current_page'];
+        }
+
+        return $this->get('coupons/search', $query);
+    }
+
+    public function generateCoupons(array $data): array
+    {
+        return $this->post('coupons/generate', $data);
     }
 }

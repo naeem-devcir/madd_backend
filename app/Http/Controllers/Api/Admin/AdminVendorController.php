@@ -62,7 +62,7 @@ class AdminVendorController extends Controller
             });
         }
 
-        if ($request->get('paginate') === 'false') {
+        if ($request->input('paginate') === 'false') {
             $vendors = $query->orderBy('company_name', 'asc')->get();
             return response()->json([
                 'success' => true,
@@ -71,7 +71,7 @@ class AdminVendorController extends Controller
         }
 
         $vendors = $query->orderBy('created_at', 'desc')
-            ->paginate($request->get('per_page', 20));
+            ->paginate($request->input('per_page', 20));
 
         return response()->json([
             'success' => true,

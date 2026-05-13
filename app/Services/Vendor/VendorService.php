@@ -10,20 +10,18 @@ use App\Models\Config\SalesPolicy;
 use App\Models\Config\Domain;
 use App\Models\Order\Order;
 use App\Services\Integration\MagentoService;
-use App\Services\Store\AdminStoreService;
+use App\Services\Store\StoreService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 
 class VendorService
 {
-    protected $magentoService;
-    protected AdminStoreService $adminStoreService;
+    protected StoreService $StoreService;
 
-    public function __construct(MagentoService $magentoService, AdminStoreService $adminStoreService)
+    public function __construct(StoreService $StoreService)
     {
-        $this->magentoService = $magentoService;
-        $this->adminStoreService = $adminStoreService;
+        $this->StoreService = $StoreService;
     }
 
     /**
@@ -35,7 +33,7 @@ class VendorService
 
         try {
             // Create Magento website and store
-            $magentoData = $this->magentoService->createVendorStore($vendor);
+            $magentoData = $this->magentoForVendor($vendor)->createVendorStore($vendor);
 
             $vendor->update([
                 'status' => 'active',
@@ -96,7 +94,7 @@ class VendorService
             throw new \Exception('Store limit reached for your plan');
         }
 
-        return $this->adminStoreService->create(array_merge($data, [
+        return $this->StoreService->create(array_merge($data, [
             'vendor_id' => $vendor->id,
             'store_slug' => $data['store_slug'] ?? Str::slug($data['store_name']),
             'status' => $data['status'] ?? 'inactive',
@@ -195,5 +193,10 @@ class VendorService
             ->groupBy('date')
             ->orderBy('date')
             ->get();
+    }
+
+    private function magentoForVendor(Vendor $vendor): MagentoService
+    {
+        return MagentoService::forVendor($vendor);
     }
 }

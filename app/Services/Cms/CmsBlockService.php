@@ -21,7 +21,7 @@ class CmsBlockService
     public function forVendor(Vendor $vendor): self
     {
         $this->vendor = $vendor;
-        $this->magentoService = new MagentoService($vendor);
+        $this->magentoService = MagentoService::forVendor($vendor);
         return $this;
     }
 

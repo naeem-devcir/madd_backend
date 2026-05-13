@@ -11,6 +11,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Validation\Rule;
 use Throwable;
@@ -168,7 +169,7 @@ class AdminProductController extends Controller
                 'seo_data'           => 'nullable|array',
             ]);
 
-            $product = $this->productService->createAdminProduct($validated, auth()->id());
+            $product = $this->productService->createAdminProduct($validated, Auth::id());
 
             return response()->json([
                 'success' => true,
@@ -225,7 +226,7 @@ class AdminProductController extends Controller
                 'seo_data'          => 'nullable|array',
             ]);
 
-            $product = $this->productService->updateAdminProduct($product, $validated, auth()->id());
+            $product = $this->productService->updateAdminProduct($product, $validated, Auth::id());
 
             return response()->json([
                 'success' => true,
@@ -265,7 +266,7 @@ class AdminProductController extends Controller
 
             $product = $query->firstOrFail();
 
-            $result = $this->productService->deleteAdminProduct($product, auth()->id());
+            $result = $this->productService->deleteAdminProduct($product, Auth::id());
 
             if ($result['blocked']) {
                 return response()->json([
@@ -360,7 +361,7 @@ class AdminProductController extends Controller
             }
 
             // Transaction lives inside productService->approveProduct
-            $product = $this->productService->approveProduct($draft, auth()->id(), $validated['notes'] ?? null);
+            $product = $this->productService->approveProduct($draft, Auth::id(), $validated['notes'] ?? null);
 
             return response()->json([
                 'success' => true,
@@ -372,7 +373,7 @@ class AdminProductController extends Controller
                     'magento_sku'        => $product->magento_sku,
                     'draft_id'           => $draft->id,
                     'status'             => 'approved',
-                    'approved_by'        => auth()->id(),
+                    'approved_by'        => Auth::id(),
                     'approved_at'        => now(),
                 ],
             ]);
@@ -408,7 +409,7 @@ class AdminProductController extends Controller
             }
 
             // Transaction lives inside productService->rejectProduct
-            $this->productService->rejectProduct($draft, auth()->id(), $validated['reason']);
+            $this->productService->rejectProduct($draft, Auth::id(), $validated['reason']);
 
             return response()->json([
                 'success' => true,
@@ -417,7 +418,7 @@ class AdminProductController extends Controller
                     'draft_id'    => $draft->id,
                     'status'      => 'rejected',
                     'reason'      => $validated['reason'],
-                    'rejected_by' => auth()->id(),
+                    'rejected_by' => Auth::id(),
                     'rejected_at' => now(),
                 ],
             ]);
@@ -452,7 +453,7 @@ class AdminProductController extends Controller
                 ], 422);
             }
 
-            $this->productService->requestModification($draft, auth()->id(), $validated['notes']);
+            $this->productService->requestModification($draft, Auth::id(), $validated['notes']);
 
             return response()->json([
                 'success' => true,
@@ -461,7 +462,7 @@ class AdminProductController extends Controller
                     'draft_id'      => $draft->id,
                     'status'        => 'needs_modification',
                     'notes'         => $validated['notes'],
-                    'requested_by'  => auth()->id(),
+                    'requested_by'  => Auth::id(),
                     'requested_at'  => now(),
                 ],
             ]);
@@ -507,7 +508,7 @@ class AdminProductController extends Controller
                         continue;
                     }
 
-                    $this->productService->approveProduct($draft, auth()->id(), $validated['notes'] ?? null);
+                    $this->productService->approveProduct($draft, Auth::id(), $validated['notes'] ?? null);
                     $results['approved'][] = $draftId;
 
                 } catch (Throwable $e) {

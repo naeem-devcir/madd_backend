@@ -4,7 +4,6 @@ namespace App\Jobs\Jobs\Product;
 
 use App\Models\Product\ProductDraft;
 use App\Models\Product\VendorProduct;
-use App\Services\Integration\MagentoService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -38,14 +37,16 @@ class SyncProductToMagento implements ShouldQueue
     /**
      * Execute the job.
      */
-    public function handle(MagentoService $magentoService): void
+    public function handle(): void
     {
         try {
             if ($this->isDraft) {
                 $draft = $this->product;
-                $result = $draft->vendor
-                    ? $draft->vendor->getMagentoService()->createOrUpdateProduct($draft)
-                    : $magentoService->createOrUpdateProduct($draft);
+                if (! $draft->vendor) {
+                    throw new \Exception('Cannot sync draft to Magento because no vendor is attached.');
+                }
+
+                $result = $draft->vendor->getMagentoService()->createOrUpdateProduct($draft);
                 
                 if (! empty($result['id']) && ! empty($result['sku'])) {
                     // Update or create vendor product record
@@ -90,9 +91,11 @@ class SyncProductToMagento implements ShouldQueue
                 }
             } else {
                 $vendorProduct = $this->product;
-                $result = $vendorProduct->vendor
-                    ? $vendorProduct->vendor->getMagentoService()->createOrUpdateProduct($vendorProduct)
-                    : $magentoService->createOrUpdateProduct($vendorProduct);
+                if (! $vendorProduct->vendor) {
+                    throw new \Exception('Cannot sync product to Magento because no vendor is attached.');
+                }
+
+                $result = $vendorProduct->vendor->getMagentoService()->createOrUpdateProduct($vendorProduct);
                 
                 if (! empty($result['id']) && ! empty($result['sku'])) {
                     $vendorProduct->update([

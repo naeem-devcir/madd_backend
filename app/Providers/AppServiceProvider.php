@@ -53,7 +53,10 @@ class EventServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->bind(MagentoService::class, function ($app) {
-            return new MagentoService();
+            throw new \RuntimeException(
+                'MagentoService is vendor-scoped and cannot be resolved from the service container. ' .
+                'Create it with MagentoService::forVendor($vendor) when a Vendor instance is available.'
+            );
         });
     }
 

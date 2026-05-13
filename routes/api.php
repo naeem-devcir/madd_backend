@@ -402,19 +402,19 @@ Route::prefix('v1')->group(function () {
 
         // Vendor Management
         Route::prefix('vendors')->group(function () {
-            Route::get('/', [Api\Admin\AdminVendorController::class, 'index']);
-            Route::post('/', [Api\Admin\AdminVendorController::class, 'store']);
-            Route::get('statistics', [Api\Admin\AdminVendorController::class, 'statistics']);
-            Route::get('applications', [Api\Admin\AdminVendorController::class, 'applications']);
-            Route::get('{id}', [Api\Admin\AdminVendorController::class, 'show']);
-            Route::put('{id}', [Api\Admin\AdminVendorController::class, 'update']);
-            Route::delete('{id}', [Api\Admin\AdminVendorController::class, 'destroy']);
-            Route::post('{id}/approve', [Api\Admin\AdminVendorController::class, 'approve']);
-            Route::post('{id}/suspend', [Api\Admin\AdminVendorController::class, 'suspend']);
-            Route::post('{id}/activate', [Api\Admin\AdminVendorController::class, 'activate']);
-            Route::put('{id}/plan', [Api\Admin\AdminVendorController::class, 'updatePlan']);
-            Route::post('{id}/kyc-verify', [Api\Admin\AdminVendorController::class, 'verifyKyc']);
-            Route::post('{id}/kyc-reject', [Api\Admin\AdminVendorController::class, 'rejectKyc']);
+            Route::get('/', [App\Http\Controllers\Api\Admin\AdminVendorController::class, 'index']);
+            Route::post('/', [App\Http\Controllers\Api\Admin\AdminVendorController::class, 'store']);
+            Route::get('statistics', [App\Http\Controllers\Api\Admin\AdminVendorController::class, 'statistics']);
+            Route::get('applications', [App\Http\Controllers\Api\Admin\AdminVendorController::class, 'applications']);
+            Route::get('{id}', [App\Http\Controllers\Api\Admin\AdminVendorController::class, 'show']);
+            Route::put('{id}', [App\Http\Controllers\Api\Admin\AdminVendorController::class, 'update']);
+            Route::delete('{id}', [App\Http\Controllers\Api\Admin\AdminVendorController::class, 'destroy']);
+            Route::post('{id}/approve', [App\Http\Controllers\Api\Admin\AdminVendorController::class, 'approve']);
+            Route::post('{id}/suspend', [App\Http\Controllers\Api\Admin\AdminVendorController::class, 'suspend']);
+            Route::post('{id}/activate', [App\Http\Controllers\Api\Admin\AdminVendorController::class, 'activate']);
+            Route::put('{id}/plan', [App\Http\Controllers\Api\Admin\AdminVendorController::class, 'updatePlan']);
+            Route::post('{id}/kyc-verify', [App\Http\Controllers\Api\Admin\AdminVendorController::class, 'verifyKyc']);
+            Route::post('{id}/kyc-reject', [App\Http\Controllers\Api\Admin\AdminVendorController::class, 'rejectKyc']);
         });
 
         // Store Management
