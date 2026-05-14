@@ -224,9 +224,7 @@ class ProductService
     {
         $vendor = Vendor::findOrFail($data['vendor_id']);
         $store = VendorStore::where('vendor_id', $vendor->getKey())->findOrFail($data['vendor_store_id']);
-
-        // Store all Magento-specific fields in product_data
-        $productData = $data['product_data'] ?? [];
+        $productData = $this->mergeProductData($data);
 
         $draft = new ProductDraft([
             'vendor_id' => $vendor->getKey(),
@@ -241,7 +239,7 @@ class ProductService
             'special_price_to' => $data['special_price_to'] ?? null,
             'quantity' => $data['quantity'] ?? 0,
             'weight' => $data['weight'] ?? 0,
-            'product_data' => $data, // This now contains ALL fields including type_id, attribute_set_id, etc.
+            'product_data' => $productData,
             'media_gallery' => $data['media_gallery'] ?? null,
             'categories' => $data['categories'] ?? null,
             'attributes' => $data['attributes'] ?? null,
@@ -262,10 +260,10 @@ class ProductService
 
         $magentoProduct = $this->createOrUpdateProductInMagento($draft);
 
-        return DB::transaction(function () use ($draft, $magentoProduct, $adminId, $data) {
-            // Get Magento-specific fields from product_data or top level
-            $typeId = $data['type_id'] ?? $data['product_data']['type_id'] ?? 'simple';
-            $attributeSetId = $data['attribute_set_id'] ?? $data['product_data']['attribute_set_id'] ?? 4;
+        return DB::transaction(function () use ($draft, $magentoProduct, $adminId, $data, $productData) {
+            // Get Magento-specific fields from the merged payload.
+            $typeId = $productData['type_id'] ?? 'simple';
+            $attributeSetId = $productData['attribute_set_id'] ?? 4;
 
             $product = VendorProduct::create([
                 'vendor_id' => $draft->vendor_id,
@@ -284,7 +282,7 @@ class ProductService
                 'metadata' => [
                     'magento' => $magentoProduct,
                     'created_by_admin_id' => $adminId,
-                    'full_payload' => $data,
+                    'full_payload' => $productData,
                 ],
             ]);
 
@@ -302,18 +300,24 @@ class ProductService
     {
         $product->loadMissing('vendor', 'store');
 
+        $productData = $this->mergeProductData($data, $product);
+
         $draft = new ProductDraft([
             'vendor_id' => $product->vendor_id,
             'vendor_store_id' => $product->vendor_store_id,
             'vendor_product_id' => $product->id,
+            'magento_product_id' => $product->magento_product_id,
             'sku' => $data['sku'] ?? $product->sku,
             'name' => $data['name'] ?? $product->name,
             'description' => $data['description'] ?? $product->draft?->description,
             'short_description' => $data['short_description'] ?? $product->draft?->short_description,
             'price' => $data['price'] ?? $product->price,
+            'special_price' => $data['special_price'] ?? $product->draft?->special_price,
+            'special_price_from' => $data['special_price_from'] ?? $product->draft?->special_price_from,
+            'special_price_to' => $data['special_price_to'] ?? $product->draft?->special_price_to,
             'quantity' => $data['quantity'] ?? $product->quantity,
             'weight' => $data['weight'] ?? $product->draft?->weight ?? 0,
-            'product_data' => $data,
+            'product_data' => $productData,
             'media_gallery' => $data['media_gallery'] ?? $product->draft?->media_gallery,
             'categories' => $data['categories'] ?? $product->draft?->categories,
             'attributes' => $data['attributes'] ?? $product->draft?->attributes,
@@ -330,7 +334,7 @@ class ProductService
 
         $magentoProduct = $this->createOrUpdateProductInMagento($draft);
 
-        return DB::transaction(function () use ($product, $draft, $magentoProduct, $adminId, $data) {
+        return DB::transaction(function () use ($product, $draft, $magentoProduct, $adminId, $data, $productData) {
             $product->update([
                 'magento_product_id' => $magentoProduct['id'] ?? $product->magento_product_id,
                 'magento_sku' => $magentoProduct['sku'] ?? $draft->sku,
@@ -344,7 +348,10 @@ class ProductService
                 'sync_status' => 'synced',
                 'last_synced_at' => now(),
                 'sync_errors' => null,
-                'metadata' => $this->mergedMetadata($product, $magentoProduct, ['updated_by_admin_id' => $adminId]),
+                'metadata' => $this->mergedMetadata($product, $magentoProduct, [
+                    'updated_by_admin_id' => $adminId,
+                    'full_payload' => $productData,
+                ]),
             ]);
 
             $draft->vendor_product_id = $product->id;
@@ -476,10 +483,17 @@ class ProductService
         $magentoService = $this->getMagentoServiceForVendor($vendor);
 
         $payload = $this->buildProductPayload($product);
+        $existingProduct = $product instanceof ProductDraft ? $product->product : null;
+        $magentoSku = $product->magento_sku
+            ?? $existingProduct?->magento_sku
+            ?? null;
+        $magentoProductId = $product->magento_product_id
+            ?? $existingProduct?->magento_product_id
+            ?? null;
 
-        if (!empty($product->magento_product_id) || !empty($product->magento_sku)) {
+        if (!empty($magentoProductId) || !empty($magentoSku)) {
             return $magentoService->put(
-                'products/' . rawurlencode($product->magento_sku ?: $product->sku),
+                'products/' . rawurlencode($magentoSku ?: $product->sku),
                 ['product' => $payload]
             );
         }
@@ -504,6 +518,27 @@ class ProductService
     }
 
     /**
+     * Merge Magento-specific payload fields from top-level and product_data.
+     */
+    private function mergeProductData(array $data, ?VendorProduct $existingProduct = null): array
+    {
+        $existingPayload = data_get($existingProduct?->metadata, 'full_payload', []);
+        $nestedPayload = $data['product_data'] ?? [];
+        $topLevelPayload = $data;
+        unset($topLevelPayload['product_data']);
+
+        $merged = array_replace_recursive($existingPayload, $nestedPayload, $topLevelPayload);
+
+        if ($existingProduct) {
+            $merged['type_id'] = $merged['type_id'] ?? $existingProduct->type_id ?? 'simple';
+            $merged['attribute_set_id'] = $merged['attribute_set_id'] ?? $existingProduct->attribute_set_id ?? 4;
+            $merged['status'] = $merged['status'] ?? $existingProduct->status ?? 'active';
+        }
+
+        return $merged;
+    }
+
+    /**
      * Build product payload for Magento API
      */
     private function buildProductPayload(ProductDraft|VendorProduct $product): array
@@ -514,19 +549,20 @@ class ProductService
         }
 
         // Get the full product data from product_data JSON field
+        $linkedProduct = $product instanceof ProductDraft ? $product->product : null;
         $productData = $product instanceof ProductDraft
-            ? ($product->product_data ?? [])
-            : ($product->metadata['full_payload'] ?? []);
+            ? $this->mergeProductData($product->product_data ?? [], $linkedProduct)
+            : $this->mergeProductData($product->metadata['full_payload'] ?? [], $product);
 
         $attributes = is_array($product->attributes ?? null) ? $product->attributes : [];
 
         // Get Magento-specific fields from product_data
-        $typeId = $productData['type_id'] ?? $product->type_id ?? 'simple';
-        $attributeSetId = $productData['attribute_set_id'] ?? $product->attribute_set_id ?? 4;
+        $typeId = $productData['type_id'] ?? $product->type_id ?? $linkedProduct?->type_id ?? 'simple';
+        $attributeSetId = $productData['attribute_set_id'] ?? $product->attribute_set_id ?? $linkedProduct?->attribute_set_id ?? 4;
         $visibility = $productData['visibility'] ?? 4;
 
         $requestedStatus = $product instanceof ProductDraft
-            ? data_get($product->product_data, 'status', 'active')
+            ? data_get($productData, 'status', $linkedProduct?->status ?? 'active')
             : ($product->status ?? 'active');
 
         $payload = [
@@ -610,12 +646,14 @@ class ProductService
 
     private function buildExtensionAttributes(ProductDraft|VendorProduct $product, Vendor $vendor, array $productData): array
     {
-        $isNewProduct = empty($product->magento_product_id);
+        $linkedProduct = $product instanceof ProductDraft ? $product->product : null;
+        $magentoProductId = $product->magento_product_id ?? $linkedProduct?->magento_product_id;
+        $isNewProduct = empty($magentoProductId);
 
         $extensionAttributes = [
             'stock_item' => [
-                'item_id' => $isNewProduct ? null : (data_get($productData, 'extension_attributes.stock_item.item_id') ?? $product->magento_product_id),
-                'product_id' => $product->magento_product_id ?? null,
+                'item_id' => $isNewProduct ? null : (data_get($productData, 'extension_attributes.stock_item.item_id') ?? $magentoProductId),
+                'product_id' => $magentoProductId ?? null,
                 'stock_id' => data_get($productData, 'extension_attributes.stock_item.stock_id', 1),
                 'qty' => (int) ($product->quantity ?? 0),
                 'is_in_stock' => ((int) ($product->quantity ?? 0)) > 0,
