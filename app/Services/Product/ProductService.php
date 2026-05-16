@@ -500,7 +500,41 @@ class ProductService
 
         return $magentoService->post('products', ['product' => $payload]);
     }
+    /**
+     * Sanitize image filename for Magento
+     */
+    /**
+     * Sanitize image filename for Magento
+     */
+    private function sanitizeImageName(string $filename): string
+    {
+        // Get extension
+        $extension = pathinfo($filename, PATHINFO_EXTENSION);
+        $extension = $extension ?: 'jpg';
 
+        // Remove any non-alphanumeric characters except dot, dash, and underscore
+        $basename = pathinfo($filename, PATHINFO_FILENAME);
+        // Allow letters, numbers, dashes, underscores, and dots
+        $basename = preg_replace('/[^a-zA-Z0-9\-_\.]/', '', $basename);
+
+        // Limit length to 30 characters
+        $basename = substr($basename, 0, 30);
+
+        // If basename is empty, generate a random name
+        if (empty($basename)) {
+            $basename = 'image_' . time() . '_' . bin2hex(random_bytes(4));
+        }
+
+        // Ensure the name doesn't start or end with special characters
+        $basename = trim($basename, '.-_');
+
+        // If still empty, use timestamp
+        if (empty($basename)) {
+            $basename = (string) time();
+        }
+
+        return $basename . '.' . $extension;
+    }
     /**
      * Delete product from Magento
      */
@@ -577,7 +611,7 @@ class ProductService
             'extension_attributes' => $this->buildExtensionAttributes($product, $vendor, $productData),
             'product_links' => $productData['product_links'] ?? [],
             'options' => $productData['options'] ?? [],
-            'media_gallery_entries' => $productData['media_gallery_entries'] ?? [],
+            'media_gallery_entries' => $this->buildMediaGalleryEntries($product, $productData),
             'tier_prices' => $productData['tier_prices'] ?? [],
             'custom_attributes' => $this->buildCustomAttributes($product, $vendor, $attributes),
         ];
@@ -594,7 +628,7 @@ class ProductService
         return array_filter($payload, fn($value) => $value !== null);
     }
 
-    
+
     private function buildCustomAttributes(ProductDraft|VendorProduct $product, Vendor $vendor, array $attributes): array
     {
         $customAttributes = [
@@ -650,35 +684,41 @@ class ProductService
         $magentoProductId = $product->magento_product_id ?? $linkedProduct?->magento_product_id;
         $isNewProduct = empty($magentoProductId);
 
+        // Build stock item data WITHOUT item_id and product_id
+        $stockItemData = [
+            'qty' => (int) ($product->quantity ?? 0),
+            'is_in_stock' => ((int) ($product->quantity ?? 0)) > 0,
+            'is_qty_decimal' => data_get($productData, 'extension_attributes.stock_item.is_qty_decimal', false),
+            'show_default_notification_message' => data_get($productData, 'extension_attributes.stock_item.show_default_notification_message', false),
+            'use_config_min_qty' => data_get($productData, 'extension_attributes.stock_item.use_config_min_qty', true),
+            'min_qty' => data_get($productData, 'extension_attributes.stock_item.min_qty', 0),
+            'use_config_min_sale_qty' => data_get($productData, 'extension_attributes.stock_item.use_config_min_sale_qty', 1),
+            'min_sale_qty' => data_get($productData, 'extension_attributes.stock_item.min_sale_qty', 1),
+            'use_config_max_sale_qty' => data_get($productData, 'extension_attributes.stock_item.use_config_max_sale_qty', true),
+            'max_sale_qty' => data_get($productData, 'extension_attributes.stock_item.max_sale_qty', 10000),
+            'use_config_backorders' => data_get($productData, 'extension_attributes.stock_item.use_config_backorders', true),
+            'backorders' => data_get($productData, 'extension_attributes.stock_item.backorders', 0),
+            'use_config_notify_stock_qty' => data_get($productData, 'extension_attributes.stock_item.use_config_notify_stock_qty', true),
+            'notify_stock_qty' => data_get($productData, 'extension_attributes.stock_item.notify_stock_qty', 5),
+            'use_config_qty_increments' => data_get($productData, 'extension_attributes.stock_item.use_config_qty_increments', true),
+            'qty_increments' => data_get($productData, 'extension_attributes.stock_item.qty_increments', 1),
+            'use_config_enable_qty_inc' => data_get($productData, 'extension_attributes.stock_item.use_config_enable_qty_inc', true),
+            'enable_qty_increments' => data_get($productData, 'extension_attributes.stock_item.enable_qty_increments', false),
+            'use_config_manage_stock' => data_get($productData, 'extension_attributes.stock_item.use_config_manage_stock', true),
+            'manage_stock' => data_get($productData, 'extension_attributes.stock_item.manage_stock', true),
+            'is_decimal_divided' => data_get($productData, 'extension_attributes.stock_item.is_decimal_divided', false),
+            'stock_status_changed_auto' => data_get($productData, 'extension_attributes.stock_item.stock_status_changed_auto', 0),
+        ];
+
+        // For existing products, DO NOT include item_id and product_id
+        // Let Magento handle it automatically
+        if (!$isNewProduct) {
+            unset($stockItemData['item_id']);
+            unset($stockItemData['product_id']);
+        }
+
         $extensionAttributes = [
-            'stock_item' => [
-                'item_id' => $isNewProduct ? null : (data_get($productData, 'extension_attributes.stock_item.item_id') ?? $magentoProductId),
-                'product_id' => $magentoProductId ?? null,
-                'stock_id' => data_get($productData, 'extension_attributes.stock_item.stock_id', 1),
-                'qty' => (int) ($product->quantity ?? 0),
-                'is_in_stock' => ((int) ($product->quantity ?? 0)) > 0,
-                'is_qty_decimal' => data_get($productData, 'extension_attributes.stock_item.is_qty_decimal', false),
-                'show_default_notification_message' => data_get($productData, 'extension_attributes.stock_item.show_default_notification_message', false),
-                'use_config_min_qty' => data_get($productData, 'extension_attributes.stock_item.use_config_min_qty', true),
-                'min_qty' => data_get($productData, 'extension_attributes.stock_item.min_qty', 0),
-                'use_config_min_sale_qty' => data_get($productData, 'extension_attributes.stock_item.use_config_min_sale_qty', 1),
-                'min_sale_qty' => data_get($productData, 'extension_attributes.stock_item.min_sale_qty', 1),
-                'use_config_max_sale_qty' => data_get($productData, 'extension_attributes.stock_item.use_config_max_sale_qty', true),
-                'max_sale_qty' => data_get($productData, 'extension_attributes.stock_item.max_sale_qty', 10000),
-                'use_config_backorders' => data_get($productData, 'extension_attributes.stock_item.use_config_backorders', true),
-                'backorders' => data_get($productData, 'extension_attributes.stock_item.backorders', 0),
-                'use_config_notify_stock_qty' => data_get($productData, 'extension_attributes.stock_item.use_config_notify_stock_qty', true),
-                'notify_stock_qty' => data_get($productData, 'extension_attributes.stock_item.notify_stock_qty', 5),
-                'use_config_qty_increments' => data_get($productData, 'extension_attributes.stock_item.use_config_qty_increments', true),
-                'qty_increments' => data_get($productData, 'extension_attributes.stock_item.qty_increments', 1),
-                'use_config_enable_qty_inc' => data_get($productData, 'extension_attributes.stock_item.use_config_enable_qty_inc', true),
-                'enable_qty_increments' => data_get($productData, 'extension_attributes.stock_item.enable_qty_increments', false),
-                'use_config_manage_stock' => data_get($productData, 'extension_attributes.stock_item.use_config_manage_stock', true),
-                'manage_stock' => data_get($productData, 'extension_attributes.stock_item.manage_stock', true),
-                'low_stock_date' => $isNewProduct ? null : data_get($productData, 'extension_attributes.stock_item.low_stock_date'),
-                'is_decimal_divided' => data_get($productData, 'extension_attributes.stock_item.is_decimal_divided', false),
-                'stock_status_changed_auto' => data_get($productData, 'extension_attributes.stock_item.stock_status_changed_auto', 0),
-            ]
+            'stock_item' => $stockItemData
         ];
 
         // Filter out null values for new products
@@ -698,37 +738,30 @@ class ProductService
             $extensionAttributes['category_links'] = $categoryLinks;
         }
 
-        // Add discounts if present
         if ($discounts = data_get($productData, 'extension_attributes.discounts')) {
             $extensionAttributes['discounts'] = $discounts;
         }
 
-        // Add bundle product options if present
         if ($bundleOptions = data_get($productData, 'extension_attributes.bundle_product_options')) {
             $extensionAttributes['bundle_product_options'] = $bundleOptions;
         }
 
-        // Add downloadable product links if present
         if ($downloadableLinks = data_get($productData, 'extension_attributes.downloadable_product_links')) {
             $extensionAttributes['downloadable_product_links'] = $downloadableLinks;
         }
 
-        // Add downloadable product samples if present
         if ($downloadableSamples = data_get($productData, 'extension_attributes.downloadable_product_samples')) {
             $extensionAttributes['downloadable_product_samples'] = $downloadableSamples;
         }
 
-        // Add giftcard amounts if present
         if ($giftcardAmounts = data_get($productData, 'extension_attributes.giftcard_amounts')) {
             $extensionAttributes['giftcard_amounts'] = $giftcardAmounts;
         }
 
-        // Add configurable product options if present
         if ($configurableOptions = data_get($productData, 'extension_attributes.configurable_product_options')) {
             $extensionAttributes['configurable_product_options'] = $configurableOptions;
         }
 
-        // Add configurable product links if present
         if ($configurableLinks = data_get($productData, 'extension_attributes.configurable_product_links')) {
             $extensionAttributes['configurable_product_links'] = $configurableLinks;
         }
@@ -803,6 +836,7 @@ class ProductService
     {
         $mediaEntries = [];
 
+        // Check for media_gallery_entries in product_data
         if ($mediaGallery = data_get($productData, 'media_gallery_entries')) {
             foreach ($mediaGallery as $media) {
                 $entry = [
@@ -815,11 +849,27 @@ class ProductService
                     'file' => $media['file'] ?? '',
                 ];
 
+                // Handle base64 encoded image content
                 if (!empty($media['content'])) {
+                    // SANITIZE THE IMAGE NAME HERE
+                    $originalName = $media['content']['name'] ?? 'image.jpg';
+                    $sanitizedName = $this->sanitizeImageName($originalName);
+
                     $entry['content'] = [
                         'base64_encoded_data' => $media['content']['base64_encoded_data'] ?? '',
-                        'type' => $media['content']['type'] ?? '',
-                        'name' => $media['content']['name'] ?? ''
+                        'type' => $media['content']['type'] ?? 'image/jpeg',
+                        'name' => $sanitizedName, // Use sanitized name
+                    ];
+                }
+                // Alternative: handle if image data is in a different format
+                elseif (!empty($media['base64_encoded_data'])) {
+                    $originalName = $media['name'] ?? 'image.jpg';
+                    $sanitizedName = $this->sanitizeImageName($originalName);
+
+                    $entry['content'] = [
+                        'base64_encoded_data' => $media['base64_encoded_data'],
+                        'type' => $media['content_type'] ?? 'image/jpeg',
+                        'name' => $sanitizedName, // Use sanitized name
                     ];
                 }
 
@@ -832,6 +882,35 @@ class ProductService
                         'video_description' => $media['extension_attributes']['video_content']['video_description'] ?? '',
                         'video_metadata' => $media['extension_attributes']['video_content']['video_metadata'] ?? ''
                     ];
+                }
+
+                $mediaEntries[] = $entry;
+            }
+        }
+
+        // Also handle media_gallery field if present (alternative format)
+        elseif ($mediaGallery = data_get($productData, 'media_gallery')) {
+            foreach ($mediaGallery as $media) {
+                $entry = [
+                    'media_type' => $media['media_type'] ?? 'image',
+                    'label' => $media['label'] ?? '',
+                    'position' => $media['position'] ?? 0,
+                    'disabled' => $media['disabled'] ?? false,
+                    'types' => $media['types'] ?? [],
+                ];
+
+                if (!empty($media['content'])) {
+                    // SANITIZE THE IMAGE NAME HERE
+                    $originalName = $media['content']['name'] ?? 'image.jpg';
+                    $sanitizedName = $this->sanitizeImageName($originalName);
+
+                    $entry['content'] = [
+                        'base64_encoded_data' => $media['content']['base64_encoded_data'] ?? '',
+                        'type' => $media['content']['type'] ?? 'image/jpeg',
+                        'name' => $sanitizedName, // Use sanitized name
+                    ];
+                } elseif (!empty($media['url'])) {
+                    $entry['file'] = $media['url'];
                 }
 
                 $mediaEntries[] = $entry;

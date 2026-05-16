@@ -256,10 +256,10 @@ class Order extends Model
             $parts[] = implode(', ', $cityParts);
         }
 
-        if (isset($address['country'])) {
-            $parts[] = $address['country'];
-        }
+        $parts = array_map(function ($part) {
+            return is_array($part) ? implode(', ', array_filter($part)) : $part;
+        }, $parts);
 
-        return implode("\n", $parts);
+        return implode("\n", array_filter($parts));
     }
 }

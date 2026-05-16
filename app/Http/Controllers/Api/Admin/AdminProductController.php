@@ -30,6 +30,7 @@ class AdminProductController extends Controller
      *
      * Query params:
      *   - vendor_id      (int)    filter by vendor — ignored when vendorId route param present
+     *   - vendor_store_id (int)   filter by store
      *   - status         (string) active|inactive|deleted
      *   - search         (string) searches name, sku, magento_sku
      *   - price_min      (numeric)
@@ -48,6 +49,16 @@ class AdminProductController extends Controller
 
             if ($resolvedVendorId) {
                 $query->where('vendor_id', $resolvedVendorId);
+            }
+
+            if ($request->filled('vendor_store_id') && is_numeric($request->vendor_store_id)) {
+                $query->where('vendor_store_id', (int) $request->vendor_store_id);
+            }
+
+            if ($request->filled('store_uuid')) {
+                $query->whereHas('store', function ($q) use ($request) {
+                    $q->where('uuid', $request->store_uuid);
+                });
             }
 
             if ($request->filled('status') && in_array($request->status, ['active', 'inactive', 'deleted'])) {
@@ -84,6 +95,8 @@ class AdminProductController extends Controller
                     'total'        => $products->total(),
                     'filters'      => array_filter([
                         'vendor_id' => $resolvedVendorId,
+                        'vendor_store_id' => $request->vendor_store_id,
+                        'store_uuid' => $request->store_uuid,
                         'status'    => $request->status,
                         'search'    => $request->search,
                         'price_min' => $request->price_min,
@@ -91,7 +104,6 @@ class AdminProductController extends Controller
                     ]),
                 ],
             ]);
-
         } catch (Throwable $e) {
             report($e);
             return $this->serverError('Failed to fetch products', $e);
@@ -118,7 +130,6 @@ class AdminProductController extends Controller
                 'success' => true,
                 'data'    => new ProductResource($product),
             ]);
-
         } catch (ModelNotFoundException) {
             return $this->notFound($vendorId ? 'Product not found for this vendor' : 'Product not found');
         } catch (Throwable $e) {
@@ -149,9 +160,11 @@ class AdminProductController extends Controller
                 'vendor_id'          => 'required|integer|exists:vendors,id',
                 'vendor_store_id'    => 'required|integer|exists:vendor_stores,id',
                 'sku'                => [
-                    'required', 'string', 'max:255',
+                    'required',
+                    'string',
+                    'max:255',
                     Rule::unique('vendor_products', 'sku')
-                        ->where(fn ($q) => $q->where('vendor_id', $request->vendor_id)),
+                        ->where(fn($q) => $q->where('vendor_id', $request->vendor_id)),
                 ],
                 'name'               => 'required|string|max:500',
                 'description'        => 'nullable|string',
@@ -171,12 +184,16 @@ class AdminProductController extends Controller
                 'extension_attributes' => 'nullable|array',
                 'product_links'      => 'nullable|array',
                 'options'            => 'nullable|array',
-                'media_gallery_entries' => 'nullable|array',
+                'media_gallery' => 'nullable|array',
                 'tier_prices'        => 'nullable|array',
                 'product_data'       => 'nullable|array',
-                'media_gallery'      => 'nullable|array',
                 'seo_data'           => 'nullable|array',
             ]);
+            
+            // Map media_gallery to media_gallery_entries for Magento
+            if (isset($validated['media_gallery']) && is_array($validated['media_gallery'])) {
+                $validated['media_gallery_entries'] = $validated['media_gallery'];
+            }
 
             $product = $this->productService->createAdminProduct($validated, Auth::id());
 
@@ -185,7 +202,6 @@ class AdminProductController extends Controller
                 'message' => 'Product created in Magento and linked in Laravel successfully',
                 'data'    => new ProductResource($product->load(['vendor', 'store', 'draft'])),
             ], 201);
-
         } catch (ValidationException $e) {
             return $this->validationError($e);
         } catch (Throwable $e) {
@@ -217,9 +233,11 @@ class AdminProductController extends Controller
 
             $validated = $request->validate([
                 'sku'               => [
-                    'nullable', 'string', 'max:255',
+                    'nullable',
+                    'string',
+                    'max:255',
                     Rule::unique('vendor_products', 'sku')
-                        ->where(fn ($q) => $q->where('vendor_id', $product->vendor_id))
+                        ->where(fn($q) => $q->where('vendor_id', $product->vendor_id))
                         ->ignore($product->id),
                 ],
                 'name'              => 'nullable|string|max:500',
@@ -254,7 +272,6 @@ class AdminProductController extends Controller
                 'message' => 'Product updated in Magento and Laravel successfully',
                 'data'    => new ProductResource($product->load(['vendor', 'store', 'draft'])),
             ]);
-
         } catch (ValidationException $e) {
             return $this->validationError($e);
         } catch (ModelNotFoundException) {
@@ -308,7 +325,6 @@ class AdminProductController extends Controller
                     'magento_sku'        => $product->magento_sku,
                 ],
             ]);
-
         } catch (ModelNotFoundException) {
             return $this->notFound($vendorId ? 'Product not found for this vendor' : 'Product not found');
         } catch (Throwable $e) {
@@ -354,7 +370,6 @@ class AdminProductController extends Controller
                     'total'         => $drafts->total(),
                 ],
             ]);
-
         } catch (Throwable $e) {
             report($e);
             return $this->serverError('Failed to fetch pending products', $e);
@@ -398,7 +413,6 @@ class AdminProductController extends Controller
                     'approved_at'        => now(),
                 ],
             ]);
-
         } catch (ValidationException $e) {
             return $this->validationError($e);
         } catch (ModelNotFoundException) {
@@ -443,7 +457,6 @@ class AdminProductController extends Controller
                     'rejected_at' => now(),
                 ],
             ]);
-
         } catch (ValidationException $e) {
             return $this->validationError($e);
         } catch (ModelNotFoundException) {
@@ -487,7 +500,6 @@ class AdminProductController extends Controller
                     'requested_at'  => now(),
                 ],
             ]);
-
         } catch (ValidationException $e) {
             return $this->validationError($e);
         } catch (ModelNotFoundException) {
@@ -531,7 +543,6 @@ class AdminProductController extends Controller
 
                     $this->productService->approveProduct($draft, Auth::id(), $validated['notes'] ?? null);
                     $results['approved'][] = $draftId;
-
                 } catch (Throwable $e) {
                     $results['failed'][] = ['id' => $draftId, 'reason' => $e->getMessage()];
                 }
@@ -545,7 +556,6 @@ class AdminProductController extends Controller
                 'message' => "Approved {$approvedCount} of {$totalCount} products",
                 'data'    => $results,
             ]);
-
         } catch (ValidationException $e) {
             return $this->validationError($e);
         } catch (Throwable $e) {
@@ -580,42 +590,42 @@ class AdminProductController extends Controller
                 'pending_sync'       => (clone $base)->where('sync_status', 'pending')->count(),
                 'synced'             => (clone $base)->where('sync_status', 'synced')->count(),
                 'failed_sync'        => (clone $base)->where('sync_status', 'failed')->count(),
-                'pending_approval'   => ProductDraft::when($vendorId, fn ($q) => $q->where('vendor_id', $vendorId))
-                                            ->where('status', 'pending')->count(),
+                'pending_approval'   => ProductDraft::when($vendorId, fn($q) => $q->where('vendor_id', $vendorId))
+                    ->where('status', 'pending')->count(),
                 'total_value'        => (clone $base)->where('status', 'active')
-                                            ->sum(DB::raw('price * quantity')),
+                    ->sum(DB::raw('price * quantity')),
                 'average_price'      => (clone $base)->where('status', 'active')->avg('price'),
 
                 // Top vendors by product count (skipped when scoped to a single vendor)
                 'by_vendor'          => $vendorId ? null : VendorProduct::select('vendor_id', DB::raw('count(*) as count'))
-                                            ->with('vendor:id,company_name,company_slug')
-                                            ->whereHas('vendor')
-                                            ->groupBy('vendor_id')
-                                            ->orderByDesc('count')
-                                            ->limit(10)
-                                            ->get(),
+                    ->with('vendor:id,company_name,company_slug')
+                    ->whereHas('vendor')
+                    ->groupBy('vendor_id')
+                    ->orderByDesc('count')
+                    ->limit(10)
+                    ->get(),
 
                 // Top 10 best-selling products (vendor-scoped when applicable)
                 'top_products'       => DB::table('order_items')
-                                            ->join('vendor_products', 'order_items.vendor_product_id', '=', 'vendor_products.id')
-                                            ->when($vendorId, fn ($q) => $q->where('vendor_products.vendor_id', $vendorId))
-                                            ->select(
-                                                'vendor_products.id',
-                                                'vendor_products.uuid',
-                                                'vendor_products.name',
-                                                DB::raw('SUM(order_items.qty_ordered) as total_sold'),
-                                                DB::raw('SUM(order_items.qty_ordered * order_items.price) as total_revenue')
-                                            )
-                                            ->groupBy('vendor_products.id', 'vendor_products.uuid', 'vendor_products.name')
-                                            ->orderByDesc('total_sold')
-                                            ->limit(10)
-                                            ->get(),
+                    ->join('vendor_products', 'order_items.vendor_product_id', '=', 'vendor_products.id')
+                    ->when($vendorId, fn($q) => $q->where('vendor_products.vendor_id', $vendorId))
+                    ->select(
+                        'vendor_products.id',
+                        'vendor_products.uuid',
+                        'vendor_products.name',
+                        DB::raw('SUM(order_items.qty_ordered) as total_sold'),
+                        DB::raw('SUM(order_items.qty_ordered * order_items.price) as total_revenue')
+                    )
+                    ->groupBy('vendor_products.id', 'vendor_products.uuid', 'vendor_products.name')
+                    ->orderByDesc('total_sold')
+                    ->limit(10)
+                    ->get(),
 
                 // 5 most recently created products
                 'recent_products'    => (clone $base)->with('vendor:id,company_name,company_slug')
-                                            ->orderByDesc('created_at')
-                                            ->limit(5)
-                                            ->get(['id', 'uuid', 'name', 'price', 'status', 'vendor_id', 'created_at']),
+                    ->orderByDesc('created_at')
+                    ->limit(5)
+                    ->get(['id', 'uuid', 'name', 'price', 'status', 'vendor_id', 'created_at']),
             ];
 
             return response()->json([
@@ -623,7 +633,6 @@ class AdminProductController extends Controller
                 'data'         => $stats,
                 'generated_at' => now(),
             ]);
-
         } catch (Throwable $e) {
             report($e);
             return $this->serverError('Failed to fetch statistics', $e);
@@ -656,7 +665,6 @@ class AdminProductController extends Controller
                 'message' => 'Product featuring is not implemented yet',
                 'product_id' => $product->uuid,
             ], 501);
-
         } catch (ModelNotFoundException) {
             return $this->notFound('Product not found');
         } catch (Throwable $e) {
@@ -679,7 +687,6 @@ class AdminProductController extends Controller
                 'message'    => 'Product unfeaturing is not implemented yet',
                 'product_id' => $product->uuid,
             ], 501);
-
         } catch (ModelNotFoundException) {
             return $this->notFound('Product not found');
         } catch (Throwable $e) {

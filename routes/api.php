@@ -417,6 +417,20 @@ Route::prefix('v1')->group(function () {
             Route::post('{id}/kyc-reject', [App\Http\Controllers\Api\Admin\AdminVendorController::class, 'rejectKyc']);
         });
 
+        // Customers Management
+        Route::prefix('vendors/{vendorUuid}/customers')->group(function () {
+            // READ operations (from local DB)
+            Route::get('/', [App\Http\Controllers\Api\Admin\AdminCustomerController::class, 'index']);
+            Route::get('/by-email/{email}', [App\Http\Controllers\Api\Admin\AdminCustomerController::class, 'byEmail']);
+            Route::get('/{uuid}', [App\Http\Controllers\Api\Admin\AdminCustomerController::class, 'show']);
+
+            // WRITE operations (Magento → Local)
+            Route::post('/', [App\Http\Controllers\Api\Admin\AdminCustomerController::class, 'store']);
+            Route::post('/sync', [App\Http\Controllers\Api\Admin\AdminCustomerController::class, 'sync']);
+            Route::put('/{uuid}', [App\Http\Controllers\Api\Admin\AdminCustomerController::class, 'update']);
+            Route::delete('/{uuid}', [App\Http\Controllers\Api\Admin\AdminCustomerController::class, 'destroy']);
+        });
+
         // Store Management
         Route::prefix('stores')->group(function () {
 
@@ -547,15 +561,41 @@ Route::prefix('v1')->group(function () {
 
         // Order Management
         Route::prefix('orders')->group(function () {
+            // Order Management (GET from local DB)
             Route::get('/', [Api\Admin\AdminOrderController::class, 'index']);
-            Route::get('statistics', [Api\Admin\AdminOrderController::class, 'statistics']);
+            Route::post('/', [Api\Admin\AdminOrderController::class, 'store']);
+            Route::get('/statistics', [Api\Admin\AdminOrderController::class, 'statistics']);
+            Route::get('/store/{storeUuid}', [Api\Admin\AdminOrderController::class, 'getOrdersByStore']);
+            Route::get('/vendor/{vendorUuid}', [Api\Admin\AdminOrderController::class, 'getOrdersByVendor']);
+            Route::post('/sync', [Api\Admin\AdminOrderController::class, 'syncOrder']);
+            Route::post('/bulk/status', [Api\Admin\AdminOrderController::class, 'bulkUpdateStatus']);
+            Route::post('/bulk/sync', [Api\Admin\AdminOrderController::class, 'bulkSyncOrders']);
+            Route::get('/{orderUuid}', [Api\Admin\AdminOrderController::class, 'show']);
+            Route::get('/{orderUuid}/timeline', [Api\Admin\AdminOrderController::class, 'timeline']);
+
+            // Order Updates
+            Route::put('/{orderUuid}/status', [Api\Admin\AdminOrderController::class, 'updateStatus']);
+            Route::post('/{orderUuid}/cancel', [Api\Admin\AdminOrderController::class, 'cancel']);
+            Route::post('/{orderUuid}/refund', [Api\Admin\AdminOrderController::class, 'processRefund']);
+            Route::post('/{orderUuid}/invoice', [Api\Admin\AdminOrderController::class, 'createInvoice']);
+            Route::post('/{orderUuid}/shipment', [Api\Admin\AdminOrderController::class, 'createShipment']);
+            Route::post('/{orderUuid}/tracking', [Api\Admin\AdminOrderController::class, 'addTracking']);
+            Route::post('/{orderUuid}/comments', [Api\Admin\AdminOrderController::class, 'addComment']);
+            Route::post('/{orderUuid}/hold', [Api\Admin\AdminOrderController::class, 'hold']);
+            Route::post('/{orderUuid}/unhold', [Api\Admin\AdminOrderController::class, 'unhold']);
+            Route::post('/{orderUuid}/reorder', [Api\Admin\AdminOrderController::class, 'reorder']);
+            Route::delete('/{orderUuid}/local', [Api\Admin\AdminOrderController::class, 'deleteLocal']);
+
+            // // Sync Operations (called from frontend)
+            // Route::post('/orders/sync', [OrderSyncController::class, 'sync']);
+            // Route::get('/orders/sync/status/{vendorUuid}', [OrderSyncController::class, 'syncStatus']);
             Route::get('{id}', [Api\Admin\AdminOrderController::class, 'show']);
             Route::put('{id}/status', [Api\Admin\AdminOrderController::class, 'updateStatus']);
             Route::post('{id}/refund', [Api\Admin\AdminOrderController::class, 'processRefund']);
             Route::post('{id}/cancel', [Api\Admin\AdminOrderController::class, 'cancel']);
 
-            Route::get('orders/by-store/{storeId}', [Api\Admin\AdminOrderController::class, 'getOrdersByStore']);
-            Route::get('orders/by-vendor/{vendorId}', [Api\Admin\AdminOrderController::class, 'getOrdersByVendor']);
+            Route::get('/by-store/{storeId}', [Api\Admin\AdminOrderController::class, 'getOrdersByStore']);
+            Route::get('/by-vendor/{vendorId}', [Api\Admin\AdminOrderController::class, 'getOrdersByVendor']);
         });
 
         // Settlement Management

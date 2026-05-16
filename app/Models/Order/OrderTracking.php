@@ -3,12 +3,13 @@
 namespace App\Models\Order;
 
 use App\Models\Config\Courier;
+use App\Models\Traits\HasUuid;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class OrderTracking extends Model
 {
-    use HasFactory;
+    use HasFactory, HasUuid;
 
     protected $table = 'order_tracking';
 
