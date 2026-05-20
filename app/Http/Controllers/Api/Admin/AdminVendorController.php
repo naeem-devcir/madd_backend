@@ -32,8 +32,9 @@ class AdminVendorController extends Controller
      */
     public function index(Request $request)
     {
+        log::info($request);
         $query = Vendor::with(['user', 'plan', 'stores']);
-
+        
         // Apply filters
         if ($request->has('status')) {
             $query->where('status', $request->status);
