@@ -453,6 +453,10 @@ Route::prefix('v1')->group(function () {
         });
 
 
+        // In your api.php file, update the vendor products routes:
+
+        // In your api.php file, update the vendor products routes:
+
         Route::prefix('by-vendor/{vendor_uuid}/products')->group(function () {
             // Special routes (must come before parameterized routes)
             Route::get('/sync/all', [App\Http\Controllers\Api\Admin\AdminProductController::class, 'fetchAllProducts']);
@@ -462,11 +466,67 @@ Route::prefix('v1')->group(function () {
             Route::get('/', [App\Http\Controllers\Api\Admin\AdminProductController::class, 'index']);
             Route::get('/{product_uuid}', [App\Http\Controllers\Api\Admin\AdminProductController::class, 'show']);
 
+            // ========== ATTRIBUTE ROUTES (Add these) ==========
+            // These must come BEFORE the generic product routes to avoid conflicts
+            Route::get('/configurable-attributes/all', [App\Http\Controllers\Api\Admin\AdminProductController::class, 'getConfigurableAttributes']);
+            Route::get('/configurable-attributes/{attributeId}/options', [App\Http\Controllers\Api\Admin\AdminProductController::class, 'getAttributeOptions']);
+            Route::get('/attributes', [App\Http\Controllers\Api\Admin\AdminProductController::class, 'getAllAttributes']);
+            Route::get('/attributes/{attributeId}', [App\Http\Controllers\Api\Admin\AdminProductController::class, 'getAttribute']);
+            Route::get('/attributes/{attributeId}/options', [App\Http\Controllers\Api\Admin\AdminProductController::class, 'getAttributeOptions']);
+
             // WRITE operations (to Magento API + local DB)
             Route::post('/', [App\Http\Controllers\Api\Admin\AdminProductController::class, 'store']);
             Route::put('/{product_uuid}', [App\Http\Controllers\Api\Admin\AdminProductController::class, 'update']);
             Route::delete('/{product_uuid}', [App\Http\Controllers\Api\Admin\AdminProductController::class, 'destroy']);
+        });;
+
+
+        // Attribute Set
+        Route::prefix('attribute-sets/{vendorUuid}')->group(function () {
+
+            // CRUD operations
+            Route::get('/', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'index'])
+                ->name('api.attribute-sets.index');
+            Route::post('/', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'store'])
+                ->name('api.attribute-sets.store');
+            Route::get('/{id}', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'show'])
+                ->name('api.attribute-sets.show');
+            Route::put('/{id}', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'update'])
+                ->name('api.attribute-sets.update');
+            Route::delete('/{id}', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'destroy'])
+                ->name('api.attribute-sets.destroy');
+
+            // Sync operations
+            Route::post('/bulk-sync', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'bulkSync'])
+                ->name('api.attribute-sets.bulk-sync');
+            Route::post('/sync-from-magento/{magentoAttrSetId}', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'syncFromMagento'])
+                ->name('api.attribute-sets.sync-from-magento');
+            Route::post('/{id}/push-to-magento', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'pushToMagento'])
+                ->name('api.attribute-sets.push-to-magento');
+
+            // Get related data
+            Route::get('/{id}/details', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'getDetails'])
+                ->name('api.attribute-sets.details');
+            Route::get('/{id}/attributes', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'getAttributes'])
+                ->name('api.attribute-sets.attributes');
+            Route::get('/{id}/groups', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'getGroups'])
+                ->name('api.attribute-sets.groups');
+
+            // Attribute assignment operations
+            Route::post('/{id}/assign-attribute', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'assignAttribute'])
+                ->name('api.attribute-sets.assign-attribute');
+            Route::delete('/{id}/remove-attribute/{attributeId}', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'removeAttribute'])
+                ->name('api.attribute-sets.remove-attribute');
+
+            // Group management
+            Route::post('/{attributeSetId}/groups', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'createGroup'])
+                ->name('api.attribute-sets.create-group');
+            Route::put('/{attributeSetId}/groups/{groupId}', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'updateGroup'])
+                ->name('api.attribute-sets.update-group');
+            Route::delete('/{attributeSetId}/groups/{groupId}', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'deleteGroup'])
+                ->name('api.attribute-sets.delete-group');
         });
+
 
         // Categories management
         Route::prefix('vendors/{vendor}/categories')->group(function () {

@@ -16,16 +16,12 @@ use Illuminate\Support\Str;
 class AdminProductController extends Controller
 {
     protected VendorService $vendorService;
-    protected ProductService $ProductService;
 
     public function __construct(VendorService $vendorService)
     {
         $this->vendorService = $vendorService;
     }
 
-    /**
-     * Get vendor by UUID
-     */
     protected function getVendor(string $vendorUuid)
     {
         $vendor = $this->vendorService->getVendorByUuid($vendorUuid);
@@ -35,9 +31,6 @@ class AdminProductController extends Controller
         return $vendor;
     }
 
-    /**
-     * Initialize Magento service for vendor
-     */
     protected function initMagentoService($vendor): ProductService
     {
         return ProductService::forVendor($vendor);
@@ -102,6 +95,168 @@ class AdminProductController extends Controller
             'message' => 'Products retrieved successfully'
         ]);
     }
+    /**
+     * POST /api/vendor/{vendor_uuid}/products/sync/all
+     * Force sync all product to Magento
+     */
+
+    public function fetchAllProducts(Request $request, string $vendorUuid)
+    {
+        try {
+            $vendor = $this->getVendor($vendorUuid);
+            $service = ProductService::forVendor($vendor);
+
+            // Fetch all products from Magento
+            $magentoResponse = $service->fetchAllProducts($request->all());
+
+            if (!isset($magentoResponse['items'])) {
+                throw new \Exception('Invalid response structure from Magento API');
+            }
+
+            $magentoProducts = $magentoResponse['items'];
+            $totalInMagento  = $magentoResponse['total_count'] ?? count($magentoProducts);
+
+            if (empty($magentoProducts)) {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'No products found in Magento to sync',
+                    'data'    => [
+                        'total_in_magento' => 0,
+                        'inserted'         => 0,
+                        'skipped'          => 0,
+                        'failed'           => 0,
+                        'errors'           => [],
+                    ],
+                ]);
+            }
+
+            // ── Step 1: Extract all Magento product IDs from the response ──────────
+            $magentoProductIds = array_filter(array_column($magentoProducts, 'id'));
+
+            // ── Step 2: Find which IDs already exist in local DB ──────────────────
+            $existingIds = VendorProduct::where('vendor_id', $vendor->id)
+                ->whereIn('magento_product_id', $magentoProductIds)
+                ->pluck('magento_product_id')
+                ->flip()          // flip to use isset() instead of in_array() — O(1)
+                ->toArray();
+
+            // ── Step 3: Get vendor store ID once (not inside the loop) ────────────
+            $vendorStoreId = null;
+
+            if ($request->has('store_uuid')) {
+                $store = \App\Models\Vendor\VendorStore::where('uuid', $request->store_uuid)
+                    ->where('vendor_id', $vendor->id)
+                    ->first();
+                $vendorStoreId = $store?->id;
+            }
+
+            if (!$vendorStoreId) {
+                $vendorStoreId = \App\Models\Vendor\VendorStore::where('vendor_id', $vendor->id)
+                    ->value('id');
+            }
+
+            // ── Step 4: Insert only new products ─────────────────────────────────
+            $insertedCount = 0;
+            $skippedCount  = 0;
+            $failedCount   = 0;
+            $errors        = [];
+
+            DB::beginTransaction();
+
+            try {
+                foreach ($magentoProducts as $magentoProduct) {
+                    $magentoId = $magentoProduct['id'] ?? null;
+
+                    // Skip products with no ID
+                    if (!$magentoId) {
+                        $skippedCount++;
+                        $errors[] = ['sku' => $magentoProduct['sku'] ?? 'unknown', 'error' => 'Missing Magento product ID'];
+                        continue;
+                    }
+
+                    // Skip if already exists locally
+                    if (isset($existingIds[$magentoId])) {
+                        $skippedCount++;
+                        continue;
+                    }
+
+                    // Skip if no SKU
+                    if (empty($magentoProduct['sku'])) {
+                        $skippedCount++;
+                        $errors[] = ['sku' => 'unknown', 'error' => "Product ID {$magentoId} has no SKU"];
+                        continue;
+                    }
+
+                    try {
+                        $quantity = (int) (
+                            $magentoProduct['extension_attributes']['stock_item']['qty']
+                            ?? $magentoProduct['quantity']
+                            ?? 0
+                        );
+
+                        VendorProduct::create([
+                            'uuid'               => (string) \Illuminate\Support\Str::uuid(),
+                            'vendor_id'          => $vendor->id,
+                            'vendor_store_id'    => $vendorStoreId,
+                            'magento_product_id' => $magentoId,
+                            'magento_sku'        => $magentoProduct['sku'],
+                            'sku'                => $magentoProduct['sku'],
+                            'name'               => $magentoProduct['name'] ?? '',
+                            'type_id'            => $magentoProduct['type_id'] ?? 'simple',
+                            'attribute_set_id'   => $magentoProduct['attribute_set_id'] ?? 4,
+                            'price'              => (float) ($magentoProduct['price'] ?? 0),
+                            'quantity'           => $quantity,
+                            'status'             => ((int) ($magentoProduct['status'] ?? 1)) === 1,
+                            'full_product_data'  => $magentoProduct,
+                            'sync_status'        => 'synced',
+                            'last_synced_at'     => now(),
+                            'metadata'           => json_encode([
+                                'synced_from' => 'magento',
+                                'sync_date'   => now()->toISOString(),
+                            ]),
+                        ]);
+
+                        $insertedCount++;
+                    } catch (\Exception $e) {
+                        $failedCount++;
+                        $errors[] = ['sku' => $magentoProduct['sku'], 'error' => $e->getMessage()];
+                        Log::error('Failed to insert product during sync', [
+                            'sku'        => $magentoProduct['sku'],
+                            'magento_id' => $magentoId,
+                            'error'      => $e->getMessage(),
+                        ]);
+                    }
+                }
+
+                DB::commit();
+            } catch (\Exception $e) {
+                DB::rollBack();
+                throw $e;
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => "Sync complete: {$insertedCount} inserted, {$skippedCount} skipped (already exist), {$failedCount} failed. Total in Magento: {$totalInMagento}.",
+                'data'    => [
+                    'total_in_magento' => $totalInMagento,
+                    'inserted'         => $insertedCount,
+                    'skipped'          => $skippedCount,
+                    'failed'           => $failedCount,
+                    'errors'           => $errors,
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('fetchAllProducts sync failed', [
+                'vendor_uuid' => $vendorUuid,
+                'error'       => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to sync products: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
 
     /**
      * GET /api/vendor/{vendor_uuid}/products/{product_uuid}
@@ -133,230 +288,19 @@ class AdminProductController extends Controller
     }
 
     /**
-     * POST /api/vendor/{vendor_uuid}/products
-     * Create product (WRITE TO MAGENTO API + SAVE TO LOCAL DB)
+     * Store product - Routes to appropriate handler based on type
      */
-    // public function store(CreateProductRequest $request, string $vendorUuid)
-    // {
-    //     Log::info($request . "NAEEM");
-    //     $vendor = $this->getVendor($vendorUuid);
-    //     $magentoService = $this->initMagentoService($vendor);
-
-    //     DB::beginTransaction();
-
-    //     try {
-    //         // Build complete payload for Magento
-    //         $magentoPayload = $this->buildMagentoPayload($request->validated());
-
-    //         // Create product in Magento
-    //         $magentoResponse = $magentoService->createProduct($magentoPayload);
-
-    //         if (!$magentoResponse['success']) {
-    //             throw new \Exception($magentoResponse['message'] ?? 'Magento product creation failed');
-    //         }
-
-    //         // Save to local database
-    //         $product = VendorProduct::create([
-    //             'vendor_id' => $vendor->id,
-    //             'vendor_store_id' => $vendor->store_id ?? null,
-    //             'magento_product_id' => $magentoResponse['product']['id'] ?? null,
-    //             'magento_sku' => $magentoResponse['sku'],
-    //             'sku' => $request->sku,
-    //             'name' => $request->name,
-    //             'type_id' => $request->type_id,
-    //             'attribute_set_id' => $request->attribute_set_id,
-    //             'price' => $request->price,
-    //             'quantity' => $request->quantity,
-    //             'status' => $request->status ?? true,
-    //             'full_product_data' => $magentoPayload,
-    //             'sync_status' => 'synced',
-    //             'last_synced_at' => now(),
-    //             'metadata' => [
-    //                 'created_from' => 'api',
-    //                 'magento_response' => $magentoResponse,
-    //                 'ip_address' => $request->ip(),
-    //             ],
-    //         ]);
-
-    //         DB::commit();
-
-    //         $product->product_data = $product->complete_product_data;
-
-    //         return response()->json([
-    //             'success' => true,
-    //             'data' => $product,
-    //             'magento_response' => $magentoResponse,
-    //             'message' => 'Product created successfully and synced to Magento'
-    //         ], 201);
-
-    //     } catch (\Exception $e) {
-    //         DB::rollBack();
-
-    //         Log::error('Product creation failed', [
-    //             'vendor_uuid' => $vendorUuid,
-    //             'error' => $e->getMessage(),
-    //             'trace' => $e->getTraceAsString()
-    //         ]);
-
-    //         return response()->json([
-    //             'success' => false,
-    //             'message' => 'Product creation failed: ' . $e->getMessage()
-    //         ], 500);
-    //     }
-    // }
-    // public function store(CreateProductRequest $request, string $vendorUuid)
-    // {
-    //     $vendor = $this->getVendor($vendorUuid);
-
-    //     $generatedSku = Str::upper(
-    //         Str::slug($request->sku, '-')
-    //     );
-
-    //     $request->merge([
-    //         'sku' => $generatedSku
-    //     ]);
-
-    //     // Get the vendor store ID
-    //     $vendorStoreId = null;
-
-    //     // Method 1: If vendor has direct store relationship
-    //     if (isset($vendor->store)) {
-    //         $vendorStoreId = $vendor->store->id;
-    //     }
-
-    //     // Method 2: If you need to find by store UUID from request
-    //     if ($request->has('store_uuid')) {
-    //         $store = \App\Models\Vendor\VendorStore::where('uuid', $request->store_uuid)
-    //             ->where('vendor_id', $vendor->id)
-    //             ->first();
-    //         if ($store) {
-    //             $vendorStoreId = $store->id;
-    //         }
-    //     }
-
-    //     // Method 3: Get first available store for vendor
-    //     if (!$vendorStoreId) {
-    //         $store = \App\Models\Vendor\VendorStore::where('vendor_id', $vendor->id)->first();
-    //         if ($store) {
-    //             $vendorStoreId = $store->id;
-    //         }
-    //     }
-
-    //     // If still no store, throw error or use default
-    //     if (!$vendorStoreId) {
-    //         return response()->json([
-    //             'success' => false,
-    //             'message' => 'No store found for this vendor. Please create a store first.'
-    //         ], 400);
-    //     }
-
-    //     $magentoService = $this->initMagentoService($vendor);
-
-    //     DB::beginTransaction();
-
-    //     try {
-    //         // Build payload
-    //         $magentoPayload = $this->buildMagentoPayload($request->validated());
-    //         Log::info('PAYLOAD FOR MAGENTO', [
-    //             'payload' => $magentoPayload
-    //         ]);
-    //         // Create product in Magento
-    //         $magentoResponse = $magentoService->createProduct($magentoPayload);
-
-    //         if (!$magentoResponse['success']) {
-    //             throw new \Exception($magentoResponse['message'] ?? 'Magento product creation failed');
-    //         }
-
-    //         // Save to local database with vendor_store_id
-    //         $product = VendorProduct::create([
-    //             'vendor_id' => $vendor->id,
-    //             'vendor_store_id' => $vendorStoreId, // ← Now this has value
-    //             'magento_product_id' => $magentoResponse['product']['id'] ?? null,
-    //             'magento_sku' => $magentoResponse['sku'],
-    //             'sku' => $generatedSku,
-    //             'name' => $request->name,
-    //             'type_id' => $request->type_id,
-    //             'attribute_set_id' => $request->attribute_set_id,
-    //             'price' => $request->price,
-    //             'quantity' => $request->quantity ?? 0,
-    //             'status' => $request->status ?? true,
-    //             'full_product_data' => $magentoPayload,
-    //             'sync_status' => 'synced',
-    //             'last_synced_at' => now(),
-    //             'metadata' => json_encode([  // Make sure to json_encode
-    //                 'created_from' => 'api',
-    //                 'magento_response' => $magentoResponse,
-    //                 'ip_address' => $request->ip(),
-    //             ]),
-    //         ]);
-
-    //         DB::commit();
-
-    //         $product->product_data = $product->complete_product_data;
-
-    //         return response()->json([
-    //             'success' => true,
-    //             'data' => $product,
-    //             'magento_response' => $magentoResponse,
-    //             'message' => 'Product created successfully and synced to Magento'
-    //         ], 201);
-    //     } catch (\Exception $e) {
-    //         DB::rollBack();
-
-    //         Log::error('Product creation failed', [
-    //             'vendor_uuid' => $vendorUuid,
-    //             'error' => $e->getMessage(),
-    //             'trace' => $e->getTraceAsString()
-    //         ]);
-
-    //         return response()->json([
-    //             'success' => false,
-    //             'message' => 'Product creation failed: ' . $e->getMessage()
-    //         ], 500);
-    //     }
-    // }
-
     public function store(CreateProductRequest $request, string $vendorUuid)
-
     {
-
         $vendor = $this->getVendor($vendorUuid);
 
-        $generatedSku = Str::upper(
-            Str::slug($request->sku, '-')
-        );
+        // Generate SKU if not provided or sanitize
+        $generatedSku = Str::upper(Str::slug($request->sku, '-'));
+        $request->merge(['sku' => $generatedSku]);
 
-        $request->merge([
-            'sku' => $generatedSku
-        ]);
+        // Get vendor store ID
+        $vendorStoreId = $this->getVendorStoreId($vendor, $request);
 
-        // Get the vendor store ID
-        $vendorStoreId = null;
-
-        // Method 1: If vendor has direct store relationship
-        if (isset($vendor->store)) {
-            $vendorStoreId = $vendor->store->id;
-        }
-
-        // Method 2: If you need to find by store UUID from request
-        if ($request->has('store_uuid')) {
-            $store = \App\Models\Vendor\VendorStore::where('uuid', $request->store_uuid)
-                ->where('vendor_id', $vendor->id)
-                ->first();
-            if ($store) {
-                $vendorStoreId = $store->id;
-            }
-        }
-
-        // Method 3: Get first available store for vendor
-        if (!$vendorStoreId) {
-            $store = \App\Models\Vendor\VendorStore::where('vendor_id', $vendor->id)->first();
-            if ($store) {
-                $vendorStoreId = $store->id;
-            }
-        }
-
-        // If still no store, throw error or use default
         if (!$vendorStoreId) {
             return response()->json([
                 'success' => false,
@@ -365,67 +309,41 @@ class AdminProductController extends Controller
         }
 
         $magentoService = $this->initMagentoService($vendor);
+        $validatedData = $request->validated();
+        $productType = $validatedData['type_id'];
 
         DB::beginTransaction();
 
         try {
-            // Build payload
-            $validatedData = $request->validated();
-
-            // ADD THIS LOG - What validated data contains
-            Log::info('VALIDATED DATA BEFORE BUILDING PAYLOAD', [
-                'has_media_gallery' => isset($validatedData['media_gallery']),
-                'media_gallery_count' => count($validatedData['media_gallery'] ?? []),
-                'media_gallery_keys' => array_keys($validatedData['media_gallery'] ?? []),
-                'first_media_item' => $validatedData['media_gallery'][0] ?? null,
-            ]);
-
-            $magentoPayload = $this->buildMagentoPayload($validatedData);
-
-            // ADD THIS LOG - What's being sent to ProductService
-            Log::info('PAYLOAD BEING SENT TO ProductService::createProduct', [
-                'has_media' => isset($magentoPayload['media']),
-                'media_count' => count($magentoPayload['media'] ?? []),
-                'media_items' => $magentoPayload['media'] ?? [],
-                'full_payload_keys' => array_keys($magentoPayload)
-            ]);
-
-            // Create product in Magento
-            $magentoPayload = $this->buildMagentoPayload($validatedData);
-
-            // CRITICAL FIX: Ensure media key matches what ProductService expects
-            if (isset($magentoPayload['media']) && !isset($magentoPayload['media'])) {
-                $magentoPayload['media'] = $magentoPayload['media'];
-            }
-
-            // ADD THIS: Log what's being sent to ProductService
-            Log::info('PAYLOAD BEING SENT TO ProductService::createProduct', [
-                'has_media' => isset($magentoPayload['media']),
-                'media_count' => count($magentoPayload['media'] ?? []),
-                'sku' => $magentoPayload['sku'],
-                'media_keys' => array_keys($magentoPayload['media'] ?? [])
-            ]);
-
-            $magentoResponse = $magentoService->createProduct($magentoPayload);
+            // Route to appropriate product type handler
+            $magentoResponse = match ($productType) {
+                'configurable' => $this->createConfigurableProduct($magentoService, $validatedData),
+                'grouped' => $this->createGroupedProduct($magentoService, $validatedData),
+                'bundle' => $this->createBundleProduct($magentoService, $validatedData),
+                'downloadable' => $this->createDownloadableProduct($magentoService, $validatedData),
+                'virtual' => $this->createVirtualProduct($magentoService, $validatedData),
+                'giftcard' => $this->createGiftCardProduct($magentoService, $validatedData),
+                default => $this->createSimpleProduct($magentoService, $validatedData),
+            };
 
             if (!$magentoResponse['success']) {
                 throw new \Exception($magentoResponse['message'] ?? 'Magento product creation failed');
             }
 
-            // Save to local database with vendor_store_id
+            // Save to local database
             $product = VendorProduct::create([
                 'vendor_id' => $vendor->id,
                 'vendor_store_id' => $vendorStoreId,
                 'magento_product_id' => $magentoResponse['product']['id'] ?? null,
                 'magento_sku' => $magentoResponse['sku'],
                 'sku' => $generatedSku,
-                'name' => $request->name,
-                'type_id' => $request->type_id,
-                'attribute_set_id' => $request->attribute_set_id,
-                'price' => $request->price,
-                'quantity' => $request->quantity ?? 0,
-                'status' => $request->status ?? true,
-                'full_product_data' => $magentoPayload,
+                'name' => $validatedData['name'],
+                'type_id' => $productType,
+                'attribute_set_id' => $validatedData['attribute_set_id'] ?? 4,
+                'price' => $validatedData['price'] ?? 0,
+                'quantity' => $validatedData['quantity'] ?? 0,
+                'status' => $validatedData['status'] ?? true,
+                'full_product_data' => $validatedData,
                 'sync_status' => 'synced',
                 'last_synced_at' => now(),
                 'metadata' => json_encode([
@@ -450,6 +368,7 @@ class AdminProductController extends Controller
 
             Log::error('Product creation failed', [
                 'vendor_uuid' => $vendorUuid,
+                'type' => $productType,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
@@ -461,6 +380,525 @@ class AdminProductController extends Controller
         }
     }
 
+    /**
+     * Create Simple Product
+     */
+    protected function createSimpleProduct(ProductService $service, array $data): array
+    {
+        $payload = $this->buildMagentoPayload($data);
+        return $service->createProduct($payload);
+    }
+
+    protected function handleAdditionalUpdates(ProductService $service, string $sku, array $data): void
+    {
+        if (isset($data['category_ids'])) {
+            $service->assignCategories($sku, $data['category_ids']);
+        }
+
+        if (isset($data['media']) && !empty($data['media'])) {
+            foreach ($data['media'] as $media) {
+                $service->uploadMedia($sku, $media);
+            }
+        }
+
+        if (isset($data['product_links']) && !empty($data['product_links'])) {
+            $service->assignProductLinks($sku, $data['product_links']);
+        }
+
+        if (isset($data['custom_options']) && !empty($data['custom_options'])) {
+            $service->addCustomOptions($sku, $data['custom_options']);
+        }
+
+        if (isset($data['tier_prices']) && !empty($data['tier_prices'])) {
+            $service->setTierPrices($sku, $data['tier_prices']);
+        }
+
+        if (isset($data['inventory'])) {
+            $service->assignMSIInventory($sku, $data['inventory']);
+        }
+    }
+
+    protected function prepareLocalUpdateFields(array $data): array
+    {
+        $fields = [];
+
+        $mappable = ['name', 'type_id', 'attribute_set_id', 'price', 'status'];
+        foreach ($mappable as $field) {
+            if (isset($data[$field])) {
+                $fields[$field] = $data[$field];
+            }
+        }
+
+        if (isset($data['quantity'])) {
+            $fields['quantity'] = $data['quantity'];
+        }
+
+        return $fields;
+    }
+
+    protected function buildUpdatePayload(array $newData, array $existingData): array
+    {
+        $payload = [];
+
+        $directFields = ['price', 'status', 'visibility', 'weight', 'tax_class_id'];
+        foreach ($directFields as $field) {
+            if (isset($newData[$field])) {
+                $payload[$field] = $newData[$field];
+            }
+        }
+
+        $customAttributes = [];
+        $attributeFields = [
+            'description',
+            'short_description',
+            'url_key',
+            'meta_title',
+            'meta_keyword',
+            'meta_description',
+            'special_price',
+            'special_from_date',
+            'special_to_date',
+            'cost',
+            'msrp'
+        ];
+
+        foreach ($attributeFields as $field) {
+            if (isset($newData[$field])) {
+                $value = $newData[$field];
+                if (is_bool($value)) {
+                    $value = $value ? '1' : '0';
+                }
+                $customAttributes[] = ['attribute_code' => $field, 'value' => (string) $value];
+            }
+        }
+
+        if (!empty($customAttributes)) {
+            $payload['custom_attributes'] = $customAttributes;
+        }
+
+        return $payload;
+    }
+
+    /**
+     * Create Configurable Product
+     */
+    protected function createConfigurableProduct(ProductService $service, array $data): array
+    {
+        if (empty($data['configurable_variants'])) {
+            throw new \Exception('Configurable products require at least one variant. Please generate variants first.');
+        }
+
+        foreach ($data['configurable_variants'] as &$variant) {
+            if (empty($variant['attribute_set_id'])) {
+                $variant['attribute_set_id'] = $data['attribute_set_id'] ?? 4;
+            }
+        }
+        unset($variant); // break reference
+
+        $parentPayload = $this->buildMagentoPayload($data);
+
+        // ✅ These three were never being carried through buildMagentoPayload
+        $parentPayload['configurable_variants'] = $data['configurable_variants'];
+        $parentPayload['configurable_options']  = $data['configurable_options'] ?? [];
+        $parentPayload['inventory']             = $data['inventory'] ?? [];
+
+        \Log::info('Configurable payload to service', [
+            'sku'             => $parentPayload['sku'],
+            'options_count'   => count($parentPayload['configurable_options']),
+            'variants_count'  => count($parentPayload['configurable_variants']),
+        ]);
+
+        return $service->createConfigurableProduct($parentPayload);
+    }
+
+    protected function convertOptionsToAttributes(array $options): array
+    {
+        $attributes = [];
+        foreach ($options as $option) {
+            $attributes[] = [
+                'attribute_id' => $option['attribute_id'],
+                'label' => $option['label'],
+                'values' => $option['values']
+            ];
+        }
+        return $attributes;
+    }
+    /**
+     * Create Grouped Product
+     */
+    protected function createGroupedProduct(ProductService $service, array $data): array
+    {
+        if (empty($data['grouped_links'])) {
+            throw new \Exception('Grouped products require at least one associated product');
+        }
+
+        $payload = $this->buildMagentoPayload($data);
+
+        // Add grouped links to payload
+        $payload['grouped_links'] = $data['grouped_links'];
+
+        return $service->createGroupedProduct($payload);
+    }
+
+    /**
+     * Create Bundle Product
+     */
+    protected function createBundleProduct(ProductService $service, array $data): array
+    {
+        if (empty($data['bundle_options'])) {
+            throw new \Exception('Bundle products require at least one bundle option');
+        }
+
+        $payload = $this->buildMagentoPayload($data);
+
+        // Add bundle-specific fields
+        $payload['bundle_options'] = $data['bundle_options'];
+        $payload['bundle_shipping_type'] = $data['bundle_shipping_type'] ?? 'together';
+        $payload['bundle_price_type'] = $data['bundle_price_type'] ?? 'dynamic';
+        $payload['bundle_sku_type'] = $data['bundle_sku_type'] ?? 'dynamic';
+
+        return $service->createBundleProduct($payload);
+    }
+
+    /**
+     * Create Downloadable Product
+     */
+    protected function createDownloadableProduct(ProductService $service, array $data): array
+    {
+        $payload = $this->buildMagentoPayload($data);
+
+        // Add downloadable-specific fields
+        if (!empty($data['downloadable_links'])) {
+            $payload['downloadable_links'] = $data['downloadable_links'];
+        }
+        if (!empty($data['downloadable_samples'])) {
+            $payload['downloadable_samples'] = $data['downloadable_samples'];
+        }
+        $payload['links_purchased_separately'] = $data['links_purchased_separately'] ?? false;
+        $payload['links_title'] = $data['links_title'] ?? 'Downloads';
+        $payload['samples_title'] = $data['samples_title'] ?? 'Samples';
+
+        return $service->createDownloadableProduct($payload);
+    }
+
+    /**
+     * Create Virtual Product
+     */
+    protected function createVirtualProduct(ProductService $service, array $data): array
+    {
+        $payload = $this->buildMagentoPayload($data);
+        $payload['type_id'] = 'virtual';
+        // Remove weight for virtual products
+        unset($payload['weight']);
+
+        return $service->createProduct($payload);
+    }
+
+    /**
+     * Create Gift Card Product
+     */
+    protected function createGiftCardProduct(ProductService $service, array $data): array
+    {
+        $payload = $this->buildMagentoPayload($data);
+
+        // Add gift card-specific fields
+        $payload['giftcard_type'] = $data['giftcard_type'] ?? 'virtual';
+        $payload['giftcard_amount_type'] = $data['giftcard_amount_type'] ?? 'fixed';
+
+        if (!empty($data['giftcard_amounts'])) {
+            $payload['giftcard_amounts'] = $data['giftcard_amounts'];
+        }
+
+        if ($data['giftcard_amount_type'] === 'dynamic') {
+            $payload['giftcard_open_amount_min'] = $data['giftcard_open_amount_min'] ?? 0;
+            $payload['giftcard_open_amount_max'] = $data['giftcard_open_amount_max'] ?? 0;
+        }
+
+        $payload['allow_message'] = $data['allow_message'] ?? true;
+        $payload['gift_message_max_length'] = $data['gift_message_max_length'] ?? 255;
+
+        return $service->createGiftCardProduct($payload);
+    }
+
+    /**
+     * Get vendor store ID
+     */
+    protected function getVendorStoreId($vendor, $request = null): ?int
+    {
+        $vendorStoreId = null;
+
+        if ($request && $request->has('vendor_store_id')) {
+            $store = \App\Models\Vendor\VendorStore::where('uuid', $request->vendor_store_id)
+                ->where('vendor_id', $vendor->id)
+                ->first();
+            if ($store) {
+                $vendorStoreId = $store->id;
+            }
+        }
+
+        if (!$vendorStoreId) {
+            $store = \App\Models\Vendor\VendorStore::where('vendor_id', $vendor->id)->first();
+            if ($store) {
+                $vendorStoreId = $store->id;
+            }
+        }
+
+        return $vendorStoreId;
+    }
+
+    /**
+     * Build Magento API payload
+     */
+    protected function buildMagentoPayload(array $data): array
+    {
+        $mediaGallery = [];
+
+        if (isset($data['media_gallery']) && is_array($data['media_gallery'])) {
+            foreach ($data['media_gallery'] as $mediaItem) {
+                if (isset($mediaItem['content']['base64_encoded_data'])) {
+                    $base64Data = $mediaItem['content']['base64_encoded_data'];
+                    if (strpos($base64Data, 'base64,') !== false) {
+                        $base64Data = substr($base64Data, strpos($base64Data, 'base64,') + 7);
+                    }
+
+                    $originalName = $mediaItem['content']['name'] ?? 'image.jpg';
+                    $sanitizedName = $this->sanitizeFilename($originalName);
+
+                    $mediaGallery[] = [
+                        'media_type' => $mediaItem['media_type'] ?? 'image',
+                        'label' => $mediaItem['label'] ?? '',
+                        'position' => (int)($mediaItem['position'] ?? 0),
+                        'disabled' => (bool)($mediaItem['disabled'] ?? false),
+                        'types' => $mediaItem['types'] ?? [],
+                        'content' => [
+                            'base64_encoded_data' => $base64Data,
+                            'type' => $mediaItem['content']['type'] ?? 'image/jpeg',
+                            'name' => $sanitizedName
+                        ]
+                    ];
+                }
+            }
+        }
+
+        $payload = [
+            'sku' => $data['sku'],
+            'name' => $data['name'],
+            'type_id' => $data['type_id'],
+            'attribute_set_id' => (int)($data['attribute_set_id'] ?? 4),
+            'price' => (float)($data['price'] ?? 0),
+            'status' => (int)($data['status'] ?? 1),
+            'visibility' => (int)($data['visibility'] ?? 4),
+            'tax_class_id' => (int)($data['tax_class_id'] ?? 0),
+            'qty' => (int)($data['quantity'] ?? 0),
+            'manage_stock' => (bool)($data['manage_stock'] ?? true),
+            'backorders' => (int)($data['backorders'] ?? 0),
+            'notify_stock_qty' => (int)($data['notify_stock_qty'] ?? 0),
+            'min_sale_qty' => (int)($data['min_sale_qty'] ?? 1),
+            'max_sale_qty' => (int)($data['max_sale_qty'] ?? 0),
+            'qty_increments' => (int)($data['qty_increments'] ?? 1),
+            'enable_qty_increments' => (bool)($data['enable_qty_increments'] ?? false),
+            'website_ids' => $data['website_ids'] ?? [1],
+            'description' => $data['description'] ?? '',
+            'short_description' => $data['short_description'] ?? '',
+            'url_key' => $data['url_key'] ?? $this->generateUrlKey($data['name']),
+            'meta_title' => $data['meta_title'] ?? $data['name'],
+            'meta_keyword' => $data['meta_keyword'] ?? '',
+            'meta_description' => $data['meta_description'] ?? '',
+            'special_price' => $data['special_price'] ?? null,
+            'special_from_date' => $data['special_from_date'] ?? null,
+            'special_to_date' => $data['special_to_date'] ?? null,
+            'cost' => $data['cost'] ?? null,
+            'msrp' => $data['msrp'] ?? null,
+            'msrp_display_actual_price_type' => $data['msrp_display_actual_price_type'] ?? null,
+            'custom_design' => $data['custom_design'] ?? null,
+            'page_layout' => $data['page_layout'] ?? null,
+            'custom_layout_update' => $data['custom_layout_update'] ?? null,
+            'gift_message_available' => $data['gift_message_available'] ?? false,
+            'news_from_date' => $data['news_from_date'] ?? null,
+            'news_to_date' => $data['news_to_date'] ?? null,
+            'country_of_manufacture' => $data['country_of_manufacture'] ?? null,
+            'category_ids' => $data['category_ids'] ?? [],
+            'media' => $mediaGallery,
+            'product_links' => array_map(function ($link) {
+                return [
+                    'link_type' => $link['link_type'] ?? 'related',
+                    'linked_sku' => $link['linked_sku'] ?? '',
+                    'linked_type' => $link['linked_type'] ?? 'simple',
+                    'position' => $link['position'] ?? 0,
+                ];
+            }, $data['product_links'] ?? []),
+            'custom_options' => $data['custom_options'] ?? [],
+            'tier_prices' => array_map(function ($tier) {
+                return [
+                    'price' => (float)($tier['price'] ?? 0),
+                    'price_type' => $tier['price_type'] ?? 'fixed',
+                    'customer_group' => $tier['customer_group'] ?? 'ALL GROUPS',
+                    'quantity' => (float)($tier['quantity'] ?? 1),
+                    'website_id' => (int)($tier['website_id'] ?? 0),
+                ];
+            }, $data['tier_prices'] ?? []),
+            'inventory' => $data['inventory'] ?? [
+                'source_code' => 'default',
+                'quantity' => $data['quantity'] ?? 0
+            ],
+            'dynamic_attributes' => $data['dynamic_attributes'] ?? [],
+        ];
+
+        // Remove weight for virtual/downloadable/giftcard
+        if (in_array($data['type_id'], ['virtual', 'downloadable', 'giftcard'])) {
+            unset($payload['weight']);
+        } else {
+            $payload['weight'] = (float)($data['weight'] ?? 0);
+        }
+
+        return $payload;
+    }
+
+    protected function sanitizeFilename(string $filename): string
+    {
+        $extension = pathinfo($filename, PATHINFO_EXTENSION);
+        $basename = pathinfo($filename, PATHINFO_FILENAME);
+        $basename = preg_replace('/[^a-zA-Z0-9\-_]/', '-', $basename);
+        $basename = preg_replace('/-+/', '-', $basename);
+        $basename = trim($basename, '-');
+
+        if (empty($basename)) {
+            $basename = 'image';
+        }
+
+        $basename = $basename . '_' . time() . '_' . rand(100, 999);
+
+        if (!empty($extension)) {
+            $allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+            $extension = strtolower($extension);
+            if (!in_array($extension, $allowedExtensions)) {
+                $extension = 'jpg';
+            }
+            return $basename . '.' . $extension;
+        }
+
+        return $basename . '.jpg';
+    }
+
+    protected function generateUrlKey(string $name): string
+    {
+        $key = strtolower($name);
+        $key = preg_replace('/[^a-z0-9-]/', '-', $key);
+        $key = preg_replace('/-+/', '-', $key);
+        return trim($key, '-');
+    }
+
+    /**
+     * GET /api/by-vendor/{vendor_uuid}/products/configurable-attributes/all
+     * Get all configurable attributes from Magento
+     */
+    public function getConfigurableAttributes(string $vendorUuid, Request $request)
+    {
+        $vendor = $this->getVendor($vendorUuid);
+        $productService = $this->initMagentoService($vendor);
+
+        try {
+            // Pass the entire request query to the service
+            $attributes = $productService->getConfigurableAttributes($request->query());
+
+            return response()->json([
+                'success' => true,
+                'data' => $attributes,
+                'message' => 'Configurable attributes retrieved successfully'
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to fetch configurable attributes', [
+                'vendor_uuid' => $vendorUuid,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch configurable attributes: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * GET /api/by-vendor/{vendor_uuid}/products/configurable-attributes/{attributeId}/options
+     * Get options for a specific attribute
+     */
+    public function getAttributeOptions(string $vendorUuid, int $attributeId)
+    {
+        $vendor = $this->getVendor($vendorUuid);
+        $productService = $this->initMagentoService($vendor);
+
+        try {
+            $options = $productService->getAttributeOptions($attributeId);
+
+            return response()->json([
+                'success' => true,
+                'data' => $options,
+                'message' => 'Attribute options retrieved successfully'
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to fetch attribute options', [
+                'vendor_uuid' => $vendorUuid,
+                'attribute_id' => $attributeId,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch attribute options: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * GET /api/by-vendor/{vendor_uuid}/products/attributes
+     * Get all product attributes
+     */
+    public function getAllAttributes(string $vendorUuid)
+    {
+        $vendor = $this->getVendor($vendorUuid);
+        $productService = $this->initMagentoService($vendor);
+
+        try {
+            $attributes = $productService->getProductAttributes();
+
+            return response()->json([
+                'success' => true,
+                'data' => $attributes,
+                'message' => 'Attributes retrieved successfully'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch attributes: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * GET /api/by-vendor/{vendor_uuid}/products/attributes/{attributeId}
+     * Get specific attribute details
+     */
+    public function getAttribute(string $vendorUuid, int $attributeId)
+    {
+        $vendor = $this->getVendor($vendorUuid);
+        $productService = $this->initMagentoService($vendor);
+
+        try {
+            $attribute = $productService->getAttribute($attributeId);
+
+            return response()->json([
+                'success' => true,
+                'data' => $attribute,
+                'message' => 'Attribute retrieved successfully'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch attribute: ' . $e->getMessage()
+            ], 500);
+        }
+    }
 
     /**
      * PUT /api/vendor/{vendor_uuid}/products/{product_uuid}
@@ -484,27 +922,18 @@ class AdminProductController extends Controller
         DB::beginTransaction();
 
         try {
-            // Update sync status to updating
             $product->update(['sync_status' => 'updating']);
 
-            // Initialize Magento service
             $magentoService = $this->initMagentoService($vendor);
-
-            // Prepare update payload
             $updateData = $this->buildUpdatePayload($request->validated(), $product->full_product_data ?? []);
 
-            // Update in Magento
             if (!empty($updateData)) {
                 $magentoService->updateProduct($product->sku, $updateData);
             }
 
-            // Handle additional operations (categories, media, etc.)
             $this->handleAdditionalUpdates($magentoService, $product->sku, $request->validated());
 
-            // Update local database
             $updateFields = $this->prepareLocalUpdateFields($request->validated());
-
-            // Merge with existing full_product_data
             $existingData = $product->full_product_data ?? [];
             $updatedFullData = array_merge($existingData, $this->buildMagentoPayload($request->validated()));
 
@@ -526,66 +955,14 @@ class AdminProductController extends Controller
         } catch (\Exception $e) {
             DB::rollBack();
 
-            $product->update(['sync_status' => 'failed', 'sync_errors' => ['update_error' => $e->getMessage()]]);
-
-            Log::error('Product update failed', [
-                'product_uuid' => $productUuid,
-                'error' => $e->getMessage()
+            $product->update([
+                'sync_status' => 'failed',
+                'sync_errors' => json_encode(['update_error' => $e->getMessage()])
             ]);
 
             return response()->json([
                 'success' => false,
                 'message' => 'Product update failed: ' . $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * DELETE /api/vendor/{vendor_uuid}/products/{product_uuid}
-     * Delete product (DELETE FROM MAGENTO + SOFT DELETE FROM LOCAL DB)
-     */
-    public function destroy(string $vendorUuid, string $productUuid)
-    {
-        $vendor = $this->getVendor($vendorUuid);
-
-        $product = VendorProduct::where('vendor_id', $vendor->id)
-            ->where('uuid', $productUuid)
-            ->first();
-
-        if (!$product) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Product not found'
-            ], 404);
-        }
-
-        DB::beginTransaction();
-
-        try {
-            // Delete from Magento
-            $magentoService = $this->initMagentoService($vendor);
-            $magentoService->magento->delete("products/{$product->sku}");
-
-            // Soft delete from local DB
-            $product->delete();
-
-            DB::commit();
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Product deleted successfully from Magento and local database'
-            ]);
-        } catch (\Exception $e) {
-            DB::rollBack();
-
-            Log::error('Product deletion failed', [
-                'product_uuid' => $productUuid,
-                'error' => $e->getMessage()
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Product deletion failed: ' . $e->getMessage()
             ], 500);
         }
     }
@@ -611,20 +988,15 @@ class AdminProductController extends Controller
 
         try {
             $magentoService = $this->initMagentoService($vendor);
-
-            // Get complete product data
             $productData = $product->complete_product_data;
-
-            // Check if product exists in Magento
             $existingProduct = $magentoService->getProductBySku($product->sku);
 
             if ($existingProduct) {
-                // Update existing product
                 $updatePayload = $this->buildUpdatePayload($productData, $productData);
                 $magentoService->updateProduct($product->sku, $updatePayload);
             } else {
-                // Create new product
-                $magentoService->createProduct($productData);
+                $magentoPayload = $this->buildMagentoPayload($productData);
+                $magentoService->createProduct($magentoPayload);
             }
 
             $product->update([
@@ -640,7 +1012,7 @@ class AdminProductController extends Controller
         } catch (\Exception $e) {
             $product->update([
                 'sync_status' => 'failed',
-                'sync_errors' => ['sync_error' => $e->getMessage()],
+                'sync_errors' => json_encode(['sync_error' => $e->getMessage()]),
             ]);
 
             return response()->json([
@@ -648,357 +1020,5 @@ class AdminProductController extends Controller
                 'message' => 'Sync failed: ' . $e->getMessage()
             ], 500);
         }
-    }
-
-      /**
-     * POST /api/vendor/{vendor_uuid}/products/sync/all
-     * Force sync all product to Magento
-     */
-
-    public function fetchAllProducts(Request $request, string $vendorUuid)
-    {
-        try {
-
-            $vendor = $this->getVendor($vendorUuid);
-
-            $service = ProductService::forVendor($vendor);
-
-            $products = $service->fetchAllProducts($request->all());
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Magento products fetched successfully',
-                'data' => $products,
-            ]);
-        } catch (\Exception $e) {
-
-            return response()->json([
-                'success' => false,
-                'message' => $e->getMessage(),
-            ], 500);
-        }
-    }
-    /**
-     * Build complete Magento API payload
-     */
-    protected function buildMagentoPayload(array $data): array
-    {
-        // Process media gallery properly - CHECK BOTH KEYS
-        $mediaGallery = [];
-
-        if (isset($data['media_gallery']) && is_array($data['media_gallery'])) {
-            foreach ($data['media_gallery'] as $mediaItem) {
-                if (isset($mediaItem['content']['base64_encoded_data'])) {
-                    $base64Data = $mediaItem['content']['base64_encoded_data'];
-                    if (strpos($base64Data, 'base64,') !== false) {
-                        $base64Data = substr($base64Data, strpos($base64Data, 'base64,') + 7);
-                    }
-
-                    // Add filename sanitization here too
-                    $originalName = $mediaItem['content']['name'] ?? 'image.jpg';
-                    $sanitizedName = $this->sanitizeFilename2($originalName); // You'll need to add this method to controller or use a helper
-
-                    $mediaGallery[] = [
-                        'media_type' => $mediaItem['media_type'] ?? 'image',
-                        'label' => $mediaItem['label'] ?? '',
-                        'position' => (int)($mediaItem['position'] ?? 0),
-                        'disabled' => (bool)($mediaItem['disabled'] ?? false),
-                        'types' => $mediaItem['types'] ?? [],
-                        'content' => [
-                            'base64_encoded_data' => $base64Data,
-                            'type' => $mediaItem['content']['type'] ?? 'image/jpeg',
-                            'name' => $sanitizedName  // Use sanitized name
-                        ]
-                    ];
-                }
-            }
-        }
-
-        return [
-            // Core product data
-            'sku' => $data['sku'],
-            'name' => $data['name'],
-            'type_id' => $data['type_id'],
-            'attribute_set_id' => (int) $data['attribute_set_id'],
-            'price' => (float) $data['price'],
-            'status' => (int) ($data['status'] ?? 1),
-            'visibility' => (int) ($data['visibility'] ?? 4),
-            'weight' => (float) ($data['weight'] ?? 0),
-            'tax_class_id' => (int) ($data['tax_class_id'] ?? 0),
-
-            // Quantity and stock
-            'qty' => (int) ($data['quantity'] ?? 0),
-            'manage_stock' => (bool) ($data['manage_stock'] ?? true),
-            'backorders' => (int) ($data['backorders'] ?? 0),
-            'notify_stock_qty' => (int) ($data['notify_stock_qty'] ?? 0),
-            'min_sale_qty' => (int) ($data['min_sale_qty'] ?? 1),
-            'max_sale_qty' => (int) ($data['max_sale_qty'] ?? 0),
-            'qty_increments' => (int) ($data['qty_increments'] ?? 1),
-            'enable_qty_increments' => (bool) ($data['enable_qty_increments'] ?? false),
-
-            // Website IDs
-            'website_ids' => $data['website_ids'] ?? [1],
-
-            // Content
-            'description' => $data['description'] ?? '',
-            'short_description' => $data['short_description'] ?? '',
-
-            // SEO
-            'url_key' => $data['url_key'] ?? $this->generateUrlKey($data['name']),
-            'meta_title' => $data['meta_title'] ?? $data['name'],
-            'meta_keyword' => $data['meta_keyword'] ?? '',
-            'meta_description' => $data['meta_description'] ?? '',
-
-            // Advanced Pricing
-            'special_price' => $data['special_price'] ?? null,
-            'special_from_date' => $data['special_from_date'] ?? null,
-            'special_to_date' => $data['special_to_date'] ?? null,
-            'cost' => $data['cost'] ?? null,
-            'msrp' => $data['msrp'] ?? null,
-            'msrp_display_actual_price_type' => $data['msrp_display_actual_price_type'] ?? null,
-
-            // Design
-            'custom_design' => $data['custom_design'] ?? null,
-            'page_layout' => $data['page_layout'] ?? null,
-            'custom_layout_update' => $data['custom_layout_update'] ?? null,
-
-            // Gift Options
-            'gift_message_available' => $data['gift_message_available'] ?? false,
-
-            // Badge Dates
-            'news_from_date' => $data['news_from_date'] ?? null,
-            'news_to_date' => $data['news_to_date'] ?? null,
-            'country_of_manufacture' => $data['country_of_manufacture'] ?? null,
-
-            // Categories
-            'category_ids' => $data['category_ids'] ?? [],
-
-            // Media - Ensure this key exists even if empty
-            'media' => $mediaGallery,
-
-            // Product Links
-            'product_links' => array_map(function ($link) {
-                return [
-                    'link_type' => $link['link_type'] ?? 'related',
-                    'linked_sku' => $link['linked_sku'] ?? $link['linked_product_sku'] ?? '',  // Normalize
-                    'linked_type' => $link['linked_type'] ?? $link['linked_product_type'] ?? 'simple',
-                    'position' => $link['position'] ?? 0,
-                ];
-            }, $data['product_links'] ?? []),
-
-            // Custom Options
-            'custom_options' => $data['custom_options'] ?? [],
-
-            // Tier Prices
-            'tier_prices' => array_map(function ($tier) {
-                return [
-                    'price' => (float) ($tier['price'] ?? 0),
-                    'price_type' => $tier['price_type'] ?? 'fixed',
-                    'customer_group' => $tier['customer_group'] ?? 'ALL GROUPS',
-                    'quantity' => (float) ($tier['quantity'] ?? 1),
-                    'website_id' => (int) ($tier['website_id'] ?? 0),
-                ];
-            }, $data['tier_prices'] ?? []),
-
-            // MSI Inventory
-            'inventory' => $data['inventory'] ?? [
-                'source_code' => 'default',
-                'quantity' => $data['quantity'] ?? 0
-            ],
-
-            // Configurable Options
-            'configurable_options' => $data['configurable_options'] ?? [],
-
-            // Dynamic Attributes
-            'dynamic_attributes' => $data['dynamic_attributes'] ?? [],
-        ];
-    }
-
-    /**
-     * Build update payload for Magento
-     */
-    protected function buildUpdatePayload(array $newData, array $existingData): array
-    {
-        $payload = [];
-
-        // Fields that can be updated directly
-        $directFields = ['price', 'status', 'visibility', 'weight', 'tax_class_id'];
-        foreach ($directFields as $field) {
-            if (isset($newData[$field])) {
-                $payload[$field] = $newData[$field];
-            }
-        }
-
-        // Handle custom attributes
-        $customAttributes = [];
-        $attributeFields = [
-            'description',
-            'short_description',
-            'url_key',
-            'meta_title',
-            'meta_keyword',
-            'meta_description',
-            'special_price',
-            'special_from_date',
-            'special_to_date',
-            'cost',
-            'msrp',
-            'msrp_display_actual_price_type',
-            'custom_design',
-            'page_layout',
-            'custom_layout_update',
-            'gift_message_available',
-            'news_from_date',
-            'news_to_date',
-            'country_of_manufacture'
-        ];
-
-        foreach ($attributeFields as $field) {
-            if (isset($newData[$field])) {
-                $value = $newData[$field];
-                if (is_bool($value)) {
-                    $value = $value ? '1' : '0';
-                }
-                if (str_contains($field, '_date') && $value && strlen($value) === 10) {
-                    $value .= ' 00:00:00';
-                }
-                $customAttributes[] = ['attribute_code' => $field, 'value' => (string) $value];
-            }
-        }
-
-        // Dynamic attributes
-        if (!empty($newData['dynamic_attributes'])) {
-            foreach ($newData['dynamic_attributes'] as $code => $value) {
-                if ($value !== null && $value !== '') {
-                    $customAttributes[] = [
-                        'attribute_code' => $code,
-                        'value' => is_bool($value) ? ($value ? '1' : '0') : (string) $value,
-                    ];
-                }
-            }
-        }
-
-        if (!empty($customAttributes)) {
-            $payload['custom_attributes'] = $customAttributes;
-        }
-
-        return $payload;
-    }
-
-    /**
-     * Handle additional updates (categories, media, links, etc.)
-     */
-    protected function handleAdditionalUpdates(ProductService $service, string $sku, array $data): void
-    {
-        // Update categories
-        if (isset($data['category_ids'])) {
-            $service->assignCategories($sku, $data['category_ids']);
-        }
-
-        // Update media
-        if (isset($data['media']) && !empty($data['media'])) {
-            foreach ($data['media'] as $media) {
-                $service->uploadMedia($sku, $media);
-            }
-        }
-
-        // Update product links
-        if (isset($data['product_links']) && !empty($data['product_links'])) {
-            $service->assignProductLinks($sku, $data['product_links']);
-        }
-
-        // Update custom options
-        if (isset($data['custom_options']) && !empty($data['custom_options'])) {
-            $service->addCustomOptions($sku, $data['custom_options']);
-        }
-
-        // Update tier prices
-        if (isset($data['tier_prices']) && !empty($data['tier_prices'])) {
-            $service->setTierPrices($sku, $data['tier_prices']);
-        }
-
-        // Update inventory
-        if (isset($data['inventory'])) {
-            $service->assignMSIInventory($sku, $data['inventory']);
-        }
-
-        // Update configurable options
-        if (isset($data['configurable_options']) && !empty($data['configurable_options'])) {
-            $service->addConfigurableOptions($sku, $data['configurable_options']);
-        }
-    }
-
-    /**
-     * Prepare fields for local database update
-     */
-    protected function prepareLocalUpdateFields(array $data): array
-    {
-        $fields = [];
-
-        $mappable = [
-            'name',
-            'type_id',
-            'attribute_set_id',
-            'price',
-            'status'
-        ];
-
-        foreach ($mappable as $field) {
-            if (isset($data[$field])) {
-                $fields[$field] = $data[$field];
-            }
-        }
-
-        if (isset($data['quantity'])) {
-            $fields['quantity'] = $data['quantity'];
-        }
-
-        return $fields;
-    }
-    protected function sanitizeFilename2(string $filename): string
-    {
-        // Get file extension
-        $extension = pathinfo($filename, PATHINFO_EXTENSION);
-        $basename = pathinfo($filename, PATHINFO_FILENAME);
-
-        // Remove all special characters except alphanumeric, dash, underscore
-        $basename = preg_replace('/[^a-zA-Z0-9\-_]/', '-', $basename);
-
-        // Replace multiple consecutive dashes with single dash
-        $basename = preg_replace('/-+/', '-', $basename);
-
-        // Remove leading/trailing dashes
-        $basename = trim($basename, '-');
-
-        // Ensure basename is not empty
-        if (empty($basename)) {
-            $basename = 'image';
-        }
-
-        // Generate unique filename with timestamp to prevent conflicts
-        $basename = $basename . '_' . time() . '_' . rand(100, 999);
-
-        // Rebuild filename with extension
-        if (!empty($extension)) {
-            // Validate extension is allowed
-            $allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
-            $extension = strtolower($extension);
-            if (!in_array($extension, $allowedExtensions)) {
-                $extension = 'jpg';
-            }
-            return $basename . '.' . $extension;
-        }
-
-        return $basename . '.jpg';
-    }
-    /**
-     * Generate URL key from name
-     */
-    protected function generateUrlKey(string $name): string
-    {
-        $key = strtolower($name);
-        $key = preg_replace('/[^a-z0-9-]/', '-', $key);
-        $key = preg_replace('/-+/', '-', $key);
-        return trim($key, '-');
     }
 }

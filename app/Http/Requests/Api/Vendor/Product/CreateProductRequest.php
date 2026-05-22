@@ -139,12 +139,25 @@ class CreateProductRequest extends FormRequest
             'inventory.status' => 'nullable|integer|in:0,1',
 
             // Configurable product options
-            'configurable_options' => 'nullable|array',
-            'configurable_options.*.attribute_id' => 'required|integer',
-            'configurable_options.*.label' => 'required|string',
-            'configurable_options.*.position' => 'integer',
-            'configurable_options.*.values' => 'required|array',
-            'configurable_options.*.values.*.value_index' => 'required|integer',
+            'configurable_options'                          => 'sometimes|array',
+            'configurable_options.*.attribute_id'           => 'required_with:configurable_options|integer',
+            'configurable_options.*.label'                  => 'required_with:configurable_options|string',
+            'configurable_options.*.position'               => 'sometimes|integer',
+            'configurable_options.*.values'                 => 'required_with:configurable_options|array',
+            'configurable_options.*.values.*.value_index'   => 'required|integer',
+
+            'configurable_variants'                                         => 'sometimes|array',
+            'configurable_variants.*.sku'                                   => 'required_with:configurable_variants|string',
+            'configurable_variants.*.name'                                  => 'required_with:configurable_variants|string',
+            'configurable_variants.*.price'                                 => 'sometimes|numeric',
+            'configurable_variants.*.quantity'                              => 'sometimes|integer',
+            'configurable_variants.*.weight'                                => 'sometimes|numeric',
+            'configurable_variants.*.attribute_set_id'                      => 'sometimes|integer',
+            'configurable_variants.*.status'                                => 'sometimes|integer',
+            'configurable_variants.*.visibility'                            => 'sometimes|integer',
+            'configurable_variants.*.configurable_attributes'               => 'sometimes|array',
+            'configurable_variants.*.configurable_attributes.*'             => 'sometimes|integer',
+
 
             // Dynamic attributes
             'dynamic_attributes' => 'nullable|array',
