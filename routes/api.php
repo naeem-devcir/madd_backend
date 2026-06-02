@@ -417,103 +417,140 @@ Route::prefix('v1')->group(function () {
             Route::post('{id}/kyc-reject', [App\Http\Controllers\Api\Admin\AdminVendorController::class, 'rejectKyc']);
         });
 
-        // Store Management
+        // Customers Management
+        Route::prefix('vendors/{vendorUuid}/customers')->group(function () {
+            // READ operations (from local DB)
+            Route::get('/', [App\Http\Controllers\Api\Admin\AdminCustomerController::class, 'index']);
+            Route::get('/by-email/{email}', [App\Http\Controllers\Api\Admin\AdminCustomerController::class, 'byEmail']);
+            Route::get('/{uuid}', [App\Http\Controllers\Api\Admin\AdminCustomerController::class, 'show']);
+
+            // WRITE operations (Magento → Local)
+            Route::post('/', [App\Http\Controllers\Api\Admin\AdminCustomerController::class, 'store']);
+            Route::post('/sync', [App\Http\Controllers\Api\Admin\AdminCustomerController::class, 'sync']);
+            Route::put('/{uuid}', [App\Http\Controllers\Api\Admin\AdminCustomerController::class, 'update']);
+            Route::delete('/{uuid}', [App\Http\Controllers\Api\Admin\AdminCustomerController::class, 'destroy']);
+        });
+
+
+        // Add to your existing routes/api.php within the stores prefix group
+
         Route::prefix('stores')->group(function () {
+            // ... existing routes ...
 
-            // ── Collection ────────────────────────────────────────────────────────────
-            Route::get('/',             [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'index']);
-            Route::post('/',            [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'store']);
+            // ── Local Store Fetching Endpoints ─────────────────────────────────────
+            Route::get('/', [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'getAllLocalStores']);
+            Route::get('/by-vendor/{vendorUuid}', [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'getLocalStoresByVendor']);
+            Route::get('/{uuid}', [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'getLocalStoreByUuid']);
 
-            // ── Vendor-scoped listing ─────────────────────────────────────────────────
-            Route::get('by-vendor/{vendorId}', [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'getStoresByVendor']);
+            // Optional: Filtered and paginated endpoints
+            Route::get('local/paginated', [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'getPaginatedLocalStores']);
+            Route::get('local/filter', [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'filterLocalStores']);
 
-            // ── Bulk ──────────────────────────────────────────────────────────────────
-            // Body: { "store_ids": [1,2,3], "status": "active" }  ← internal IDs ok for bulk
-            Route::post('bulk-status',  [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'bulkStatusUpdate']);
+            // ✅ ADD THIS ROUTE - Sync stores from Magento
+            Route::post('sync-from-magento', [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'syncStores']);
 
-            // ── Single resource (all use UUID) ────────────────────────────────────────
-            Route::get('{uuid}',            [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'show']);
-            Route::put('{uuid}',            [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'update']);
-            Route::delete('{uuid}',         [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'destroy']);
-            Route::delete('{uuid}/force',   [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'forceDelete']);
-            Route::post('{uuid}/restore',   [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'restore']);
-            Route::post('{uuid}/activate',  [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'activate']);
-            Route::post('{uuid}/deactivate', [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'deactivate']);
-            Route::post('{uuid}/domain',    [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'addDomain']);
-            Route::get('{uuid}/stats',      [App\Http\Controllers\Api\Admin\AdminStoreController::class, 'stats']);
+            // ... rest of existing routes ...
         });
 
-        // Product Management
-        // Route::prefix('products')->group(function () {
-        //     Route::get('/', [Api\Admin\AdminProductController::class, 'index']);
-        //     Route::post('/', [Api\Admin\AdminProductController::class, 'store']);
-        //     Route::get('statistics', [Api\Admin\AdminProductController::class, 'statistics']);
-        //     Route::get('pending', [Api\Admin\AdminProductController::class, 'pending']);
-        //     Route::get('vendor/{vendorId}', [Api\Admin\AdminProductController::class, 'vendorIndex']);
-        //     Route::post('vendor/{vendorId}', [Api\Admin\AdminProductController::class, 'storeForVendor']);
-        //     Route::get('vendor/{vendorId}/{uuid}', [Api\Admin\AdminProductController::class, 'showForVendor']);
-        //     Route::put('vendor/{vendorId}/{uuid}', [Api\Admin\AdminProductController::class, 'updateForVendor']);
-        //     Route::delete('vendor/{vendorId}/{uuid}', [Api\Admin\AdminProductController::class, 'destroyForVendor']);
-        //     Route::get('{id}', [Api\Admin\AdminProductController::class, 'show']);
-        //     Route::put('{id}', [Api\Admin\AdminProductController::class, 'update']);
-        //     Route::post('drafts/{id}/approve', [Api\Admin\AdminProductController::class, 'approve']);
-        //     Route::post('drafts/{id}/reject', [Api\Admin\AdminProductController::class, 'reject']);
-        //     Route::post('drafts/{id}/request-modification', [Api\Admin\AdminProductController::class, 'requestModification']);
-        //     Route::delete('{id}', [Api\Admin\AdminProductController::class, 'destroy']);
-        //     Route::post('{id}/feature', [Api\Admin\AdminProductController::class, 'feature']);
-        //     Route::post('{id}/unfeature', [Api\Admin\AdminProductController::class, 'unfeature']);
-        // });
 
-        Route::prefix('products')->group(function () {
+        // In your api.php file, update the vendor products routes:
 
-            // ── Statistics ────────────────────────────────────────────────────────────
-            Route::get('statistics', [Api\Admin\AdminProductController::class, 'statistics']);
+        // In your api.php file, update the vendor products routes:
 
-            // ── Draft approval workflow ───────────────────────────────────────────────
-            Route::prefix('drafts')->group(function () {
-                Route::get('pending',                   [Api\Admin\AdminProductController::class, 'pending']);
-                Route::post('{id}/approve',             [Api\Admin\AdminProductController::class, 'approve']);
-                Route::post('{id}/reject',              [Api\Admin\AdminProductController::class, 'reject']);
-                Route::post('{id}/request-modification', [Api\Admin\AdminProductController::class, 'requestModification']);
-                Route::post('bulk-approve',             [Api\Admin\AdminProductController::class, 'bulkApprove']);
-            });
+        Route::prefix('by-vendor/{vendor_uuid}/products')->group(function () {
+            // Special routes (must come before parameterized routes)
+            Route::get('/sync/all', [App\Http\Controllers\Api\Admin\AdminProductController::class, 'fetchAllProducts']);
+            Route::post('/sync/{product_uuid}', [App\Http\Controllers\Api\Admin\AdminProductController::class, 'forceSync']);
 
-            // ── Global product CRUD (all vendors) ────────────────────────────────────
-            Route::get('/',           [Api\Admin\AdminProductController::class, 'index']);
-            Route::post('/',          [Api\Admin\AdminProductController::class, 'store']);
-            Route::get('{uuid}',      [Api\Admin\AdminProductController::class, 'show']);
-            Route::put('{uuid}',      [Api\Admin\AdminProductController::class, 'update']);
-            Route::delete('{uuid}',   [Api\Admin\AdminProductController::class, 'destroy']);
-            Route::post('{uuid}/feature',   [Api\Admin\AdminProductController::class, 'feature']);
-            Route::post('{uuid}/unfeature', [Api\Admin\AdminProductController::class, 'unfeature']);
-        });
+            // READ operations (from local DB only)
+            Route::get('/', [App\Http\Controllers\Api\Admin\AdminProductController::class, 'index']);
+            Route::get('/{product_uuid}', [App\Http\Controllers\Api\Admin\AdminProductController::class, 'show']);
 
-        // ── Vendor-scoped product CRUD ────────────────────────────────────────────────
-        Route::prefix('vendors/{vendorId}/products')->group(function () {
-            Route::get('statistics',  [Api\Admin\AdminProductController::class, 'statistics']);
-            Route::get('/',           [Api\Admin\AdminProductController::class, 'index']);
-            Route::post('/',          [Api\Admin\AdminProductController::class, 'store']);
-            Route::get('{uuid}',      [Api\Admin\AdminProductController::class, 'show']);
-            Route::put('{uuid}',      [Api\Admin\AdminProductController::class, 'update']);
-            Route::delete('{uuid}',   [Api\Admin\AdminProductController::class, 'destroy']);
+            // ========== ATTRIBUTE ROUTES (Add these) ==========
+            // These must come BEFORE the generic product routes to avoid conflicts
+            Route::get('/configurable-attributes/all', [App\Http\Controllers\Api\Admin\AdminProductController::class, 'getConfigurableAttributes']);
+            Route::get('/configurable-attributes/{attributeId}/options', [App\Http\Controllers\Api\Admin\AdminProductController::class, 'getAttributeOptions']);
+            Route::get('/attributes', [App\Http\Controllers\Api\Admin\AdminProductController::class, 'getAllAttributes']);
+            Route::get('/attributes/{attributeId}', [App\Http\Controllers\Api\Admin\AdminProductController::class, 'getAttribute']);
+            Route::get('/attributes/{attributeId}/options', [App\Http\Controllers\Api\Admin\AdminProductController::class, 'getAttributeOptions']);
+
+            // WRITE operations (to Magento API + local DB)
+            Route::post('/', [App\Http\Controllers\Api\Admin\AdminProductController::class, 'store']);
+            Route::put('/{product_uuid}', [App\Http\Controllers\Api\Admin\AdminProductController::class, 'update']);
+            Route::delete('/{product_uuid}', [App\Http\Controllers\Api\Admin\AdminProductController::class, 'destroy']);
+        });;
+
+
+        // Attribute Set
+        Route::prefix('attribute-sets/{vendorUuid}')->group(function () {
+
+            // CRUD operations
+            Route::get('/', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'index'])
+                ->name('api.attribute-sets.index');
+            Route::post('/', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'store'])
+                ->name('api.attribute-sets.store');
+            Route::get('/{id}', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'show'])
+                ->name('api.attribute-sets.show');
+            Route::put('/{id}', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'update'])
+                ->name('api.attribute-sets.update');
+            Route::delete('/{id}', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'destroy'])
+                ->name('api.attribute-sets.destroy');
+
+            // Sync operations
+            Route::post('/bulk-sync', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'bulkSync'])
+                ->name('api.attribute-sets.bulk-sync');
+            Route::post('/sync-from-magento/{magentoAttrSetId}', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'syncFromMagento'])
+                ->name('api.attribute-sets.sync-from-magento');
+            Route::post('/{id}/push-to-magento', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'pushToMagento'])
+                ->name('api.attribute-sets.push-to-magento');
+
+            // Get related data
+            Route::get('/{id}/details', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'getDetails'])
+                ->name('api.attribute-sets.details');
+            Route::get('/{id}/attributes', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'getAttributes'])
+                ->name('api.attribute-sets.attributes');
+            Route::get('/{id}/groups', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'getGroups'])
+                ->name('api.attribute-sets.groups');
+            Route::get('/{id}/structure', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'getStructure'])
+                ->name('api.attribute-sets.structure');
+
+            // Attribute assignment operations
+            Route::post('/{id}/assign-attribute', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'assignAttribute'])
+                ->name('api.attribute-sets.assign-attribute');
+            Route::delete('/{id}/remove-attribute/{attributeId}', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'removeAttribute'])
+                ->name('api.attribute-sets.remove-attribute');
+
+            // Group management
+            Route::post('/{attributeSetId}/groups', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'createGroup'])
+                ->name('api.attribute-sets.create-group');
+            Route::put('/{attributeSetId}/groups/{groupId}', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'updateGroup'])
+                ->name('api.attribute-sets.update-group');
+            Route::delete('/{attributeSetId}/groups/{groupId}', [App\Http\Controllers\Api\Admin\AdminAttributeSetController::class, 'deleteGroup'])
+                ->name('api.attribute-sets.delete-group');
         });
 
 
         // Categories management
-        Route::prefix('vendors/{vendor}/categories')->group(function () {
-            Route::get('/', [Api\Admin\AdminCategoryController::class, 'index']);              // READ local
-            Route::get('/tree', [Api\Admin\AdminCategoryController::class, 'tree']);           // READ local
-            Route::get('/stats', [Api\Admin\AdminCategoryController::class, 'stats']);         // READ local
-            Route::get('/export', [Api\Admin\AdminCategoryController::class, 'export']);       // READ local
-            Route::get('/{uuid}', [Api\Admin\AdminCategoryController::class, 'show']);         // READ local
+        Route::prefix('vendors/{vendorId}/categories')->group(function () {
 
-            Route::post('/', [Api\Admin\AdminCategoryController::class, 'store']);             // WRITE via service
-            Route::post('/sync', [Api\Admin\AdminCategoryController::class, 'sync']);          // WRITE via service
-            Route::post('/bulk-positions', [Api\Admin\AdminCategoryController::class, 'bulkUpdatePositions']); // WRITE via service
+            // Category CRUD Operations
+            Route::get('/', [App\Http\Controllers\Api\Admin\AdminCategoryController::class, 'index']);
+            Route::post('/', [App\Http\Controllers\Api\Admin\AdminCategoryController::class, 'store']);
+            Route::get('/tree', [App\Http\Controllers\Api\Admin\AdminCategoryController::class, 'tree']);
+            Route::post('/sync', [App\Http\Controllers\Api\Admin\AdminCategoryController::class, 'sync']);
 
-            Route::put('/{uuid}', [Api\Admin\AdminCategoryController::class, 'update']);       // WRITE via service
+            // Single Category Operations
+            Route::get('/{uuid}', [App\Http\Controllers\Api\Admin\AdminCategoryController::class, 'show']);
+            Route::put('/{uuid}', [App\Http\Controllers\Api\Admin\AdminCategoryController::class, 'update']);
+            Route::delete('/{uuid}', [App\Http\Controllers\Api\Admin\AdminCategoryController::class, 'destroy']);
 
-            Route::delete('/{uuid}', [Api\Admin\AdminCategoryController::class, 'destroy']);   // WRITE via service
+            // Category Product Management
+            Route::get('/{uuid}/products', [App\Http\Controllers\Api\Admin\AdminCategoryController::class, 'products']);
+            Route::post('/{uuid}/products', [App\Http\Controllers\Api\Admin\AdminCategoryController::class, 'assignProduct']);
+            Route::delete('/{uuid}/products/{sku}', [App\Http\Controllers\Api\Admin\AdminCategoryController::class, 'removeProduct']);
+
+            // Direct Magento Category Fetch (bypass local cache)
+            Route::get('/magento/{magentoId}', [App\Http\Controllers\Api\Admin\AdminCategoryController::class, 'magentoCategory']);
         });
 
 
@@ -545,17 +582,59 @@ Route::prefix('v1')->group(function () {
             Route::delete('/{uuid}', [App\Http\Controllers\Api\Admin\AdminCmsPageController::class, 'destroy']);
         });
 
+
         // Order Management
         Route::prefix('orders')->group(function () {
+
+            // ==========================================
+            // NEW ACTIVE ROUTES (Priority)
+            // ==========================================
+
+            // Sync orders from Magento (GET operation)
+            Route::post('/sync-orders', [Api\Admin\AdminOrderController::class, 'syncOrders']);
+
+            // Create manual order in Magento (POST operation)
+            Route::post('/create-order', [Api\Admin\AdminOrderController::class, 'createManualOrder']);
+
+            // Read operations (using vendor_uuid filter)
             Route::get('/', [Api\Admin\AdminOrderController::class, 'index']);
-            Route::get('statistics', [Api\Admin\AdminOrderController::class, 'statistics']);
+            Route::get('/{orderUuid}', [Api\Admin\AdminOrderController::class, 'show']);
+
+
+            // ==========================================
+            // EXISTING ROUTES (Keep as is, will be used later)
+            // ==========================================
+
+            // Order Management
+            Route::post('/', [Api\Admin\AdminOrderController::class, 'store']);
+            Route::get('/statistics', [Api\Admin\AdminOrderController::class, 'statistics']);
+            Route::get('/store/{storeUuid}', [Api\Admin\AdminOrderController::class, 'getOrdersByStore']);
+            Route::get('/vendor/{vendorUuid}', [Api\Admin\AdminOrderController::class, 'getOrdersByVendor']);
+            Route::post('/sync', [Api\Admin\AdminOrderController::class, 'syncOrder']);
+            Route::post('/bulk/status', [Api\Admin\AdminOrderController::class, 'bulkUpdateStatus']);
+            Route::post('/bulk/sync', [Api\Admin\AdminOrderController::class, 'bulkSyncOrders']);
+            Route::get('/{orderUuid}/timeline', [Api\Admin\AdminOrderController::class, 'timeline']);
+
+            // Order Updates
+            Route::put('/{orderUuid}/status', [Api\Admin\AdminOrderController::class, 'updateStatus']);
+            Route::post('/{orderUuid}/cancel', [Api\Admin\AdminOrderController::class, 'cancel']);
+            Route::post('/{orderUuid}/refund', [Api\Admin\AdminOrderController::class, 'processRefund']);
+            Route::post('/{orderUuid}/invoice', [Api\Admin\AdminOrderController::class, 'createInvoice']);
+            Route::post('/{orderUuid}/shipment', [Api\Admin\AdminOrderController::class, 'createShipment']);
+            Route::post('/{orderUuid}/tracking', [Api\Admin\AdminOrderController::class, 'addTracking']);
+            Route::post('/{orderUuid}/comments', [Api\Admin\AdminOrderController::class, 'addComment']);
+            Route::post('/{orderUuid}/hold', [Api\Admin\AdminOrderController::class, 'hold']);
+            Route::post('/{orderUuid}/unhold', [Api\Admin\AdminOrderController::class, 'unhold']);
+            Route::post('/{orderUuid}/reorder', [Api\Admin\AdminOrderController::class, 'reorder']);
+            Route::delete('/{orderUuid}/local', [Api\Admin\AdminOrderController::class, 'deleteLocal']);
+
+            // Additional routes
             Route::get('{id}', [Api\Admin\AdminOrderController::class, 'show']);
             Route::put('{id}/status', [Api\Admin\AdminOrderController::class, 'updateStatus']);
             Route::post('{id}/refund', [Api\Admin\AdminOrderController::class, 'processRefund']);
             Route::post('{id}/cancel', [Api\Admin\AdminOrderController::class, 'cancel']);
-
-            Route::get('orders/by-store/{storeId}', [Api\Admin\AdminOrderController::class, 'getOrdersByStore']);
-            Route::get('orders/by-vendor/{vendorId}', [Api\Admin\AdminOrderController::class, 'getOrdersByVendor']);
+            Route::get('/by-store/{storeId}', [Api\Admin\AdminOrderController::class, 'getOrdersByStore']);
+            Route::get('/by-vendor/{vendorId}', [Api\Admin\AdminOrderController::class, 'getOrdersByVendor']);
         });
 
         // Settlement Management

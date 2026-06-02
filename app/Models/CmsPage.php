@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Models;
 
 use App\Models\Vendor\Vendor;
@@ -6,6 +7,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Str;
+
 class CmsPage extends Model
 {
     use HasFactory;
@@ -43,6 +45,8 @@ class CmsPage extends Model
     protected $casts = [
         'is_active' => 'boolean',
         'sort_order' => 'integer',
+        'layout_update_xml' => 'string',
+        'custom_layout_update_xml' => 'string',
         'custom_theme_from' => 'date',
         'custom_theme_to' => 'date',
         'meta_data' => 'array',
@@ -55,7 +59,7 @@ class CmsPage extends Model
     protected static function boot()
     {
         parent::boot();
-        
+
         static::creating(function ($model) {
             if (empty($model->uuid)) {
                 $model->uuid = (string) Str::uuid();

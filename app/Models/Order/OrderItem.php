@@ -6,14 +6,18 @@ use App\Models\Product\VendorProduct;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use App\Models\Traits\HasUuid;
+use Illuminate\Support\Str;
+
 
 class OrderItem extends Model
 {
-    use HasFactory, SoftDeletes;
+    use HasFactory, HasUuid, SoftDeletes;
 
     protected $table = 'order_items';
 
     protected $fillable = [
+        'uuid',
         'order_id',
         'magento_item_id',
         'vendor_product_id',
@@ -127,4 +131,16 @@ class OrderItem extends Model
     {
         return $this->row_total;
     }
+
+    protected static function boot()
+    {
+        parent::boot();
+
+        static::creating(function ($model) {
+            if (empty($model->uuid)) {
+                $model->uuid = (string) Str::uuid();
+            }
+        });
+    }
+
 }

@@ -2,260 +2,456 @@
 
 namespace App\Services\Store;
 
-use App\Models\Config\Domain;
 use App\Models\Vendor\Vendor;
 use App\Models\Vendor\VendorStore;
-use App\Services\Integration\MagentoService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use App\Services\Integration\MagentoService;
+use Carbon\Carbon;
 
 class StoreService
 {
-    public function create(array $data): VendorStore
+    protected ?Vendor $vendor = null;
+    protected ?MagentoService $magentoService = null;
+
+    public function forVendor(Vendor $vendor): self
     {
-        $vendor = Vendor::findOrFail($data['vendor_id']);
-        $this->ensureVendorMagentoWebsiteConfigured($vendor, $data);
-        $storeValues = $this->storeValues($vendor, $data);
+        $this->vendor = $vendor;
+        $this->magentoService = new MagentoService($vendor);
+        return $this;
+    }
 
-        try {
-            $magentoData = $this->magentoForVendor($vendor)->createStoreGroupFromData($vendor, $storeValues);
-            if (empty($magentoData['store_group_id'])) {
-                throw new \Exception('Magento store was created but no store/group ID was returned.');
-            }
-        } catch (\Throwable $e) {
-            Log::error('Magento store creation failed; Laravel store was not created', [
-                'vendor_id' => $vendor->id,
-                'store_name' => $data['store_name'] ?? null,
-                'error' => $e->getMessage(),
-            ]);
-
-            throw $e;
+    protected function magento(): MagentoService
+    {
+        if (!$this->magentoService) {
+            throw new \RuntimeException('Vendor not set. Call forVendor() first.');
         }
+        return $this->magentoService;
+    }
+
+    /**
+     * Sync all stores from Magento to local database
+     * 
+     * @return array {
+     *     'synced_count' => int,
+     *     'skipped_count' => int,
+     *     'failed_count' => int,
+     *     'stores' => array,
+     *     'errors' => array
+     * }
+     */
+    public function syncAllStores(): array
+    {
+        Log::info('Starting store sync from Magento', [
+            'vendor_id' => $this->vendor->id,
+            'vendor_uuid' => $this->vendor->uuid,
+            'vendor_name' => $this->vendor->company_name
+        ]);
+
+        $result = [
+            'synced_count' => 0,
+            'skipped_count' => 0,
+            'failed_count' => 0,
+            'stores' => [],
+            'errors' => []
+        ];
 
         try {
-            return DB::transaction(function () use ($data, $magentoData, $storeValues) {
-                $store = VendorStore::create(array_merge($storeValues, [
-                    'magento_store_id' => $magentoData['store_id'],
-                    'magento_store_group_id' => $magentoData['store_group_id'],
-                    'magento_website_id' => $magentoData['website_id'],
-                    'metadata' => $this->mergeMagentoMetadata(null, $magentoData, $storeValues['metadata'] ?? []),
-                ]));
-                $this->attachDomains($store, $data);
+            // Fetch stores from Magento
+            $magentoStores = $this->fetchMagentoStores();
+            
+            if (empty($magentoStores)) {
+                Log::warning('No stores found in Magento', [
+                    'vendor_id' => $this->vendor->id
+                ]);
+                return $result;
+            }
 
-                return $store->fresh(['vendor', 'domain', 'theme']);
-            });
-        } catch (\Throwable $e) {
-            Log::error('Laravel store creation failed after Magento store was created', [
-                'vendor_id' => $vendor->id,
-                'magento_store_group_id' => $magentoData['store_group_id'] ?? null,
-                'error' => $e->getMessage(),
+            Log::info('Fetched stores from Magento', [
+                'vendor_id' => $this->vendor->id,
+                'count' => count($magentoStores)
             ]);
 
-            if (! empty($magentoData['store_group_id'])) {
+            // Process each store
+            foreach ($magentoStores as $magentoStore) {
                 try {
-                    $this->magentoForVendor($vendor)->deleteStoreGroupById((int) $magentoData['store_group_id']);
-                } catch (\Throwable $deleteException) {
-                    Log::critical('Failed to rollback Magento store after Laravel store creation failure', [
-                        'vendor_id' => $vendor->id,
-                        'magento_store_group_id' => $magentoData['store_group_id'],
-                        'error' => $deleteException->getMessage(),
+                    $syncResult = $this->syncSingleStore($magentoStore);
+                    
+                    if ($syncResult['action'] === 'created') {
+                        $result['synced_count']++;
+                        $result['stores'][] = $syncResult['store'];
+                    } elseif ($syncResult['action'] === 'skipped') {
+                        $result['skipped_count']++;
+                    }
+                } catch (\Exception $e) {
+                    $result['failed_count']++;
+                    $errorMsg = sprintf(
+                        'Failed to sync store %s: %s',
+                        $magentoStore['code'] ?? 'unknown',
+                        $e->getMessage()
+                    );
+                    $result['errors'][] = $errorMsg;
+                    
+                    Log::error('Failed to sync individual store', [
+                        'vendor_id' => $this->vendor->id,
+                        'magento_store' => $magentoStore,
+                        'error' => $e->getMessage()
                     ]);
                 }
             }
 
-            throw $e;
-        }
-    }
-
-    public function update(VendorStore $store, array $data): VendorStore
-    {
-        $magentoStore = $store->replicate();
-        $magentoStore->exists = true;
-        $magentoStore->id = $store->id;
-        $magentoStore->forceFill($data);
-        $magentoStore->magento_website_id = $magentoStore->magento_website_id ?: $store->vendor->magento_website_id;
-
-        if ($magentoStore->status === 'active' && $store->status !== 'active') {
-            $data['activated_at'] = now();
-        }
-
-        if ($store->magento_store_id || $store->magento_store_group_id) {
-            $magentoResult = $this->magentoForVendor($store->vendor)->updateStoreGroup($magentoStore);
-        } else {
-            $this->ensureVendorMagentoWebsiteConfigured($store->vendor, $data);
-            $magentoResult = $this->magentoForVendor($store->vendor)->createStoreGroupFromData($store->vendor, [
-                'store_name' => $magentoStore->store_name,
-                'store_slug' => $magentoStore->store_slug,
-                'status' => $magentoStore->status,
-            ]);
-            if (empty($magentoResult['store_group_id'])) {
-                throw new \Exception('Magento store was created but no store/group ID was returned.');
-            }
-
-            $data['magento_store_id'] = $magentoResult['store_id'];
-            $data['magento_store_group_id'] = $magentoResult['store_group_id'];
-            $data['magento_website_id'] = $magentoResult['website_id'];
-        }
-
-        return DB::transaction(function () use ($store, $data, $magentoResult) {
-            $store->update($data);
-            $store->update([
-                'metadata' => $this->mergeMagentoMetadata($store->fresh(), $magentoResult),
+            Log::info('Store sync completed', [
+                'vendor_id' => $this->vendor->id,
+                'synced' => $result['synced_count'],
+                'skipped' => $result['skipped_count'],
+                'failed' => $result['failed_count']
             ]);
 
-            return $store->fresh(['vendor', 'domain', 'theme']);
-        });
+            return $result;
+
+        } catch (\Exception $e) {
+            Log::error('Failed to sync stores from Magento', [
+                'vendor_id' => $this->vendor->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            $result['errors'][] = 'Sync failed: ' . $e->getMessage();
+            return $result;
+        }
     }
 
-    public function delete(VendorStore $store, bool $force = false): array
+    /**
+     * Fetch all stores from Magento using Magento API
+     * 
+     * @return array
+     * @throws \Exception
+     */
+    protected function fetchMagentoStores(): array
     {
-        return DB::transaction(function () use ($store, $force) {
-            $magentoResult = $this->magentoForVendor($store->vendor)->deleteStoreGroup($store);
-
-            if ($force) {
-                Domain::where('vendor_store_id', $store->id)->forceDelete();
-                $store->forceDelete();
-            } else {
-                Domain::where('vendor_store_id', $store->id)->delete();
-                $store->delete();
+        try {
+            // Magento API endpoint for stores
+            // GET /rest/V1/store/storeViews
+            // This returns all store views in Magento
+            $stores = $this->magento()->get('store/storeViews');
+            
+            if (!is_array($stores)) {
+                throw new \Exception('Invalid response format from Magento API');
             }
 
-            return $magentoResult;
-        });
+            // If we need store groups and websites for additional data
+            $storeGroups = $this->magento()->get('store/storeGroups');
+            $websites = $this->magento()->get('store/websites');
+
+            // Enhance store data with additional information
+            foreach ($stores as &$store) {
+                $store['store_group'] = $this->findStoreGroup($store['store_group_id'] ?? null, $storeGroups);
+                $store['website'] = $this->findWebsite($store['website_id'] ?? null, $websites);
+            }
+
+            return $stores;
+
+        } catch (\Exception $e) {
+            throw new \Exception('Failed to fetch stores from Magento API: ' . $e->getMessage());
+        }
     }
 
-    public function getVendorStoreLimit(Vendor $vendor): int
+    /**
+     * Find store group by ID
+     */
+    protected function findStoreGroup($groupId, array $storeGroups): ?array
     {
-        return $vendor->plan->max_stores ?? 1;
-    }
-
-    public function ensureVendorMagentoWebsiteConfigured(Vendor $vendor, array $data = []): void
-    {
-        if (! $vendor->magento_website_id && ! empty($data['magento_website_id'])) {
-            $vendor->forceFill(['magento_website_id' => $data['magento_website_id']])->save();
-            $vendor->refresh();
+        if (!$groupId) {
+            return null;
         }
 
-        if ($vendor->magento_website_id) {
-            return;
+        foreach ($storeGroups as $group) {
+            if (($group['id'] ?? $group['store_group_id'] ?? null) == $groupId) {
+                return $group;
+            }
         }
 
-        throw new \Exception('Vendor Magento website ID is not configured. Magento installation automation is intentionally not implemented.');
+        return null;
     }
 
-    private function storeValues(Vendor $vendor, array $data, array $magentoData = []): array
+    /**
+     * Find website by ID
+     */
+    protected function findWebsite($websiteId, array $websites): ?array
     {
-        $status = $data['status'] ?? 'inactive';
-        $slug = $this->uniqueSlug($vendor, $data['store_slug'] ?? Str::slug($data['store_name']));
+        if (!$websiteId) {
+            return null;
+        }
+
+        foreach ($websites as $website) {
+            if (($website['id'] ?? $website['website_id'] ?? null) == $websiteId) {
+                return $website;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Sync a single store - checks existence and creates if needed
+     * 
+     * @param array $magentoStore
+     * @return array
+     */
+    protected function syncSingleStore(array $magentoStore): array
+    {
+        // Check if store already exists by Magento store ID
+        $existingStore = VendorStore::where('vendor_id', $this->vendor->id)
+            ->where('magento_store_id', $magentoStore['id'] ?? null)
+            ->first();
+
+        if ($existingStore) {
+            Log::info('Store already exists, skipping', [
+                'vendor_id' => $this->vendor->id,
+                'magento_store_id' => $magentoStore['id'] ?? null,
+                'store_name' => $existingStore->store_name
+            ]);
+
+            return [
+                'action' => 'skipped',
+                'store' => $existingStore
+            ];
+        }
+
+        // Additional check by store code if magento_store_id is not available
+        if (empty($magentoStore['id']) && !empty($magentoStore['code'])) {
+            $existingByCode = VendorStore::where('vendor_id', $this->vendor->id)
+                ->where('store_slug', $magentoStore['code'])
+                ->first();
+
+            if ($existingByCode) {
+                Log::info('Store already exists by code, skipping', [
+                    'vendor_id' => $this->vendor->id,
+                    'store_code' => $magentoStore['code']
+                ]);
+
+                return [
+                    'action' => 'skipped',
+                    'store' => $existingByCode
+                ];
+            }
+        }
+
+        // Create new store
+        $store = $this->createStoreFromMagentoData($magentoStore);
+        
+        Log::info('New store created from Magento sync', [
+            'vendor_id' => $this->vendor->id,
+            'store_id' => $store->id,
+            'store_uuid' => $store->uuid,
+            'store_name' => $store->store_name,
+            'magento_store_id' => $store->magento_store_id
+        ]);
 
         return [
-            'uuid' => $data['uuid'] ?? (string) Str::uuid(),
-            'vendor_id' => $vendor->id,
-            'store_name' => $data['store_name'],
-            'store_slug' => $slug,
-            'country_code' => $data['country_code'] ?? $vendor->country_code ?? 'US',
-            'language_code' => $data['language_code'] ?? 'en',
-            'currency_code' => $data['currency_code'] ?? 'EUR',
-            'timezone' => $data['timezone'] ?? $vendor->timezone ?? 'UTC',
-            'subdomain' => $data['subdomain'] ?? null,
-            'domain_id' => $data['domain_id'] ?? null,
-            'magento_store_id' => $magentoData['store_id'] ?? $data['magento_store_id'] ?? null,
-            'magento_store_group_id' => $magentoData['store_group_id'] ?? $data['magento_store_group_id'] ?? null,
-            'magento_website_id' => $magentoData['website_id'] ?? $data['magento_website_id'] ?? $vendor->magento_website_id,
-            'theme_id' => $data['theme_id'] ?? null,
-            'status' => $status,
-            'sales_policy_id' => $data['sales_policy_id'] ?? null,
-            'logo_url' => $data['logo_url'] ?? null,
-            'favicon_url' => $data['favicon_url'] ?? null,
-            'banner_url' => $data['banner_url'] ?? null,
-            'primary_color' => $data['primary_color'] ?? '#000000',
-            'secondary_color' => $data['secondary_color'] ?? '#666666',
-            'contact_email' => $data['contact_email'] ?? $vendor->contact_email,
-            'contact_phone' => $data['contact_phone'] ?? $vendor->phone,
-            'seo_meta_title' => $data['seo_meta_title'] ?? null,
-            'seo_meta_description' => $data['seo_meta_description'] ?? null,
-            'seo_settings' => $data['seo_settings'] ?? null,
-            'payment_methods' => $data['payment_methods'] ?? null,
-            'shipping_methods' => $data['shipping_methods'] ?? null,
-            'tax_settings' => $data['tax_settings'] ?? null,
-            'social_links' => $data['social_links'] ?? null,
-            'google_analytics_id' => $data['google_analytics_id'] ?? null,
-            'facebook_pixel_id' => $data['facebook_pixel_id'] ?? null,
-            'custom_css' => $data['custom_css'] ?? null,
-            'custom_js' => $data['custom_js'] ?? null,
-            'is_demo' => $data['is_demo'] ?? false,
-            'address' => $data['address'] ?? null,
-            'metadata' => $this->mergeMagentoMetadata(null, $magentoData, $data['metadata'] ?? []),
-            'activated_at' => $status === 'active' ? now() : null,
+            'action' => 'created',
+            'store' => $store
         ];
     }
 
-    private function attachDomains(VendorStore $store, array $data): void
+    /**
+     * Create a new VendorStore record from Magento store data
+     * 
+     * @param array $magentoStore
+     * @return VendorStore
+     */
+    protected function createStoreFromMagentoData(array $magentoStore): VendorStore
     {
-        if (! empty($data['domain'])) {
-            $domain = Domain::firstOrCreate(
-                ['domain' => $data['domain']],
-                [
-                    'uuid' => (string) Str::uuid(),
-                    'vendor_store_id' => $store->id,
-                    'type' => 'vendor_custom',
-                    'verification_token' => Str::random(32),
-                    'dns_verified' => false,
-                    'ssl_status' => 'pending',
-                    'is_primary' => true,
-                ]
-            );
-
-            $store->update(['domain_id' => $domain->id]);
-            return;
-        }
-
-        if (! empty($data['subdomain'])) {
-            $domain = Domain::create([
-                'uuid' => (string) Str::uuid(),
-                'vendor_store_id' => $store->id,
-                'domain' => $data['subdomain'] . '.' . config('app.domain', 'example.com'),
-                'type' => 'madd_subdomain',
-                'verification_token' => Str::random(32),
-                'dns_verified' => true,
-                'dns_verified_at' => now(),
-                'ssl_status' => 'active',
-                'is_primary' => true,
-            ]);
-
-            $store->update(['domain_id' => $domain->id]);
-        }
+        $storeData = $this->mapMagentoStoreToVendorStore($magentoStore);
+        
+        return DB::transaction(function () use ($storeData) {
+            return VendorStore::create($storeData);
+        });
     }
 
-    private function uniqueSlug(Vendor $vendor, string $slug): string
+    /**
+     * Map Magento store data to VendorStore model attributes
+     * 
+     * @param array $magentoStore
+     * @return array
+     */
+    protected function mapMagentoStoreToVendorStore(array $magentoStore): array
     {
-        $base = Str::slug($slug) ?: 'store';
-        $candidate = $base;
-        $counter = 1;
+        // Extract core store information
+        $storeCode = $magentoStore['code'] ?? $magentoStore['store_code'] ?? null;
+        $storeName = $magentoStore['name'] ?? $magentoStore['store_name'] ?? 'Unnamed Store';
+        
+        // Generate slug from store code or name
+        $slug = $storeCode ? Str::slug($storeCode) : Str::slug($storeName);
+        
+        // Get store group and website data
+        $storeGroup = $magentoStore['store_group'] ?? [];
+        $website = $magentoStore['website'] ?? [];
+        
+        // Determine store settings from Magento data
+        $countryCode = $this->extractCountryCode($magentoStore, $storeGroup, $website);
+        $languageCode = $this->extractLanguageCode($magentoStore, $storeGroup);
+        $currencyCode = $this->extractCurrencyCode($storeGroup, $website);
+        $timezone = $this->extractTimezone($storeGroup, $website);
 
-        while (VendorStore::withTrashed()->where('vendor_id', $vendor->id)->where('store_slug', $candidate)->exists()) {
-            $candidate = $base . '-' . $counter;
-            $counter++;
-        }
-
-        return $candidate;
+        return [
+            'uuid' => (string) Str::uuid(),
+            'vendor_id' => $this->vendor->id,
+            'store_name' => $storeName,
+            'store_slug' => $slug,
+            'country_code' => $countryCode,
+            'language_code' => $languageCode,
+            'currency_code' => $currencyCode,
+            'timezone' => $timezone,
+            'domain_id' => null, // Will be set separately if needed
+            'subdomain' => $storeCode ?: null,
+            'magento_store_id' => $magentoStore['id'] ?? $magentoStore['store_id'] ?? null,
+            'magento_store_group_id' => $magentoStore['store_group_id'] ?? $storeGroup['id'] ?? null,
+            'magento_website_id' => $magentoStore['website_id'] ?? $website['id'] ?? null,
+            'theme_id' => null,
+            'status' => 'active', // Default status
+            'sales_policy_id' => null,
+            'logo_url' => null,
+            'favicon_url' => null,
+            'banner_url' => null,
+            'primary_color' => null,
+            'secondary_color' => null,
+            'contact_email' => null,
+            'contact_phone' => null,
+            'seo_meta_title' => null,
+            'seo_meta_description' => null,
+            'seo_settings' => null,
+            'payment_methods' => null,
+            'shipping_methods' => null,
+            'tax_settings' => null,
+            'social_links' => null,
+            'google_analytics_id' => null,
+            'facebook_pixel_id' => null,
+            'custom_css' => null,
+            'custom_js' => null,
+            'is_demo' => false,
+            'address' => null,
+            'metadata' => json_encode([
+                'synced_from_magento' => true,
+                'magento_synced_at' => Carbon::now()->toISOString(),
+                'original_magento_data' => $magentoStore
+            ]),
+            'activated_at' => null,
+            'created_at' => Carbon::now(),
+            'updated_at' => Carbon::now(),
+        ];
     }
 
-    private function mergeMagentoMetadata(?VendorStore $store, array $magentoData, array $baseMetadata = []): array
+    /**
+     * Extract country code from Magento data
+     */
+    protected function extractCountryCode(array $magentoStore, array $storeGroup, array $website): ?string
     {
-        $metadata = is_array($store?->metadata) ? $store->metadata : $baseMetadata;
+        // Try multiple sources for country code
+        $sources = [
+            $magentoStore['country_code'] ?? null,
+            $magentoStore['locale'] ?? null,
+            $storeGroup['country_code'] ?? null,
+            $website['country_code'] ?? null,
+            $this->vendor->default_country_code ?? null
+        ];
 
-        if (! empty($magentoData)) {
-            $metadata['magento'] = $magentoData;
-            $metadata['magento_synced_at'] = now()->toIso8601String();
+        foreach ($sources as $source) {
+            if ($source && strlen($source) >= 2) {
+                return substr($source, 0, 2);
+            }
         }
 
-        return $metadata;
+        return config('app.fallback_country', 'US');
     }
 
-    private function magentoForVendor(Vendor $vendor): MagentoService
+    /**
+     * Extract language code from Magento data
+     */
+    protected function extractLanguageCode(array $magentoStore, array $storeGroup): ?string
     {
+        $sources = [
+            $magentoStore['language_code'] ?? null,
+            $magentoStore['locale'] ?? null,
+            $storeGroup['language_code'] ?? null,
+            $this->vendor->default_language_code ?? null
+        ];
+
+        foreach ($sources as $source) {
+            if ($source && strlen($source) >= 2) {
+                return substr($source, 0, 2);
+            }
+        }
+
+        return config('app.fallback_locale', 'en');
+    }
+
+    /**
+     * Extract currency code from Magento data
+     */
+    protected function extractCurrencyCode(array $storeGroup, array $website): ?string
+    {
+<<<<<<< HEAD
         return MagentoService::forVendor($vendor);
+=======
+        $sources = [
+            $storeGroup['currency_code'] ?? null,
+            $website['currency_code'] ?? null,
+            $this->vendor->default_currency_code ?? null
+        ];
+
+        foreach ($sources as $source) {
+            if ($source && strlen($source) === 3) {
+                return strtoupper($source);
+            }
+        }
+
+        return 'USD';
+>>>>>>> ed6c091e3f7981a057470097acbb7779e169584f
+    }
+
+    /**
+     * Extract timezone from Magento data
+     */
+    protected function extractTimezone(array $storeGroup, array $website): ?string
+    {
+        $sources = [
+            $storeGroup['timezone'] ?? null,
+            $website['timezone'] ?? null,
+            $this->vendor->default_timezone ?? null
+        ];
+
+        foreach ($sources as $source) {
+            if ($source) {
+                return $source;
+            }
+        }
+
+        return config('app.timezone', 'UTC');
+    }
+
+    /**
+     * Get single store by UUID (READ)
+     */
+    public function getStoreByUuid(string $uuid): ?array
+    {
+        $store = VendorStore::where('vendor_id', $this->vendor->id)
+            ->where('uuid', $uuid)
+            ->first();
+
+        return $store ? $store->toArray() : null;
+    }
+
+    /**
+     * Get store by Magento ID (READ)
+     */
+    public function getStoreByMagentoId(int $magentoStoreId): ?array
+    {
+        $store = VendorStore::where('vendor_id', $this->vendor->id)
+            ->where('magento_store_id', $magentoStoreId)
+            ->first();
+
+        return $store ? $store->toArray() : null;
     }
 }

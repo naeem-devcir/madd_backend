@@ -3,12 +3,13 @@
 namespace App\Models\Order;
 
 use App\Models\User;
+use App\Models\Traits\HasUuid;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class OrderStatusHistory extends Model
 {
-    use HasFactory;
+    use HasFactory, HasUuid;
 
     protected $table = 'order_status_history';
 

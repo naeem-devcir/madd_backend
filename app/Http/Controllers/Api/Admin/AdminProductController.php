@@ -3,146 +3,158 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Http\Resources\ProductResource;
-use App\Models\Product\ProductDraft;
+use App\Http\Requests\Api\Vendor\Product\CreateProductRequest;
+use App\Http\Requests\Api\Vendor\Product\UpdateProductRequest;
 use App\Models\Product\VendorProduct;
 use App\Services\Product\ProductService;
-use Illuminate\Http\JsonResponse;
+use App\Services\Vendor\VendorService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Validation\Rule;
 use Throwable;
 
 class AdminProductController extends Controller
 {
-    public function __construct(protected ProductService $productService) {}
+    protected VendorService $vendorService;
 
-    // -------------------------------------------------------------------------
-    // PRODUCT LISTING & DETAIL
-    // -------------------------------------------------------------------------
-
-    /**
-     * GET /admin/products
-     * GET /admin/vendors/{vendorId}/products
-     *
-     * Query params:
-     *   - vendor_id      (int)    filter by vendor — ignored when vendorId route param present
-     *   - status         (string) active|inactive|deleted
-     *   - search         (string) searches name, sku, magento_sku
-     *   - price_min      (numeric)
-     *   - price_max      (numeric)
-     *   - per_page       (int, max 100, default 20)
-     */
-    public function index(Request $request, ?int $vendorId = null): JsonResponse
+    public function __construct(VendorService $vendorService)
     {
-        try {
-            $query = VendorProduct::with(['vendor', 'store']);
+        $this->vendorService = $vendorService;
+    }
 
-            // Vendor scope: route param takes priority over query param
-            $resolvedVendorId = $vendorId ?? ($request->filled('vendor_id') && is_numeric($request->vendor_id)
-                ? (int) $request->vendor_id
-                : null);
-
-            if ($resolvedVendorId) {
-                $query->where('vendor_id', $resolvedVendorId);
-            }
-
-            if ($request->filled('status') && in_array($request->status, ['active', 'inactive', 'deleted'])) {
-                $query->where('status', $request->status);
-            }
-
-            if ($request->filled('search') && strlen($request->search) >= 2) {
-                $term = '%' . addcslashes($request->search, '%_') . '%';
-                $query->where(function ($q) use ($term) {
-                    $q->where('name', 'like', $term)
-                        ->orWhere('sku', 'like', $term)
-                        ->orWhere('magento_sku', 'like', $term);
-                });
-            }
-
-            if ($request->filled('price_min') && is_numeric($request->price_min)) {
-                $query->where('price', '>=', $request->price_min);
-            }
-
-            if ($request->filled('price_max') && is_numeric($request->price_max)) {
-                $query->where('price', '<=', $request->price_max);
-            }
-
-            $perPage = min((int) $request->input('per_page', 20), 100);
-            $products = $query->orderBy('created_at', 'desc')->paginate($perPage);
-
-            return response()->json([
-                'success' => true,
-                'data'    => ProductResource::collection($products),
-                'meta'    => [
-                    'current_page' => $products->currentPage(),
-                    'last_page'    => $products->lastPage(),
-                    'per_page'     => $products->perPage(),
-                    'total'        => $products->total(),
-                    'filters'      => array_filter([
-                        'vendor_id' => $resolvedVendorId,
-                        'status'    => $request->status,
-                        'search'    => $request->search,
-                        'price_min' => $request->price_min,
-                        'price_max' => $request->price_max,
-                    ]),
-                ],
-            ]);
-
-        } catch (Throwable $e) {
-            report($e);
-            return $this->serverError('Failed to fetch products', $e);
+    protected function getVendor(string $vendorUuid)
+    {
+        $vendor = $this->vendorService->getVendorByUuid($vendorUuid);
+        if (!$vendor) {
+            abort(404, 'Vendor not found');
         }
+        return $vendor;
+    }
+
+    protected function initMagentoService($vendor): ProductService
+    {
+        return ProductService::forVendor($vendor);
     }
 
     /**
-     * GET /admin/products/{uuid}
-     * GET /admin/vendors/{vendorId}/products/{uuid}
+     * GET /api/vendor/{vendor_uuid}/products
+     * List all products (READ FROM LOCAL DB ONLY)
      */
-    public function show(string $uuid, ?int $vendorId = null): JsonResponse
+    public function index(Request $request, string $vendorUuid)
+    {
+        $vendor = $this->getVendor($vendorUuid);
+
+        $query = VendorProduct::where('vendor_id', $vendor->id);
+
+        // Apply filters
+        if ($request->has('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'LIKE', "%{$search}%")
+                    ->orWhere('sku', 'LIKE', "%{$search}%");
+            });
+        }
+
+        if ($request->has('type_id')) {
+            $query->where('type_id', $request->type_id);
+        }
+
+        if ($request->has('sync_status')) {
+            $query->where('sync_status', $request->sync_status);
+        }
+
+        if ($request->has('status')) {
+            $query->where('status', $request->status);
+        }
+
+        if ($request->has('min_price')) {
+            $query->where('price', '>=', $request->min_price);
+        }
+
+        if ($request->has('max_price')) {
+            $query->where('price', '<=', $request->max_price);
+        }
+
+        // Sorting
+        $sortBy = $request->get('sort_by', 'created_at');
+        $sortOrder = $request->get('sort_order', 'desc');
+        $query->orderBy($sortBy, $sortOrder);
+
+        $perPage = $request->get('per_page', 15);
+        $products = $query->paginate($perPage);
+
+        // Add complete product data as attribute
+        $products->getCollection()->transform(function ($product) {
+            $product->product_data = $product->complete_product_data;
+            return $product;
+        });
+
+        return response()->json([
+            'success' => true,
+            'data' => $products,
+            'message' => 'Products retrieved successfully'
+        ]);
+    }
+    /**
+     * POST /api/vendor/{vendor_uuid}/products/sync/all
+     * Force sync all product to Magento
+     */
+
+    public function fetchAllProducts(Request $request, string $vendorUuid)
     {
         try {
-            $query = VendorProduct::with(['vendor', 'store', 'draft', 'reviews', 'orderItems'])
-                ->where('uuid', $uuid);
+            $vendor = $this->getVendor($vendorUuid);
+            $service = ProductService::forVendor($vendor);
 
-            if ($vendorId) {
-                $query->where('vendor_id', $vendorId);
+            // Fetch all products from Magento
+            $magentoResponse = $service->fetchAllProducts($request->all());
+
+            if (!isset($magentoResponse['items'])) {
+                throw new \Exception('Invalid response structure from Magento API');
             }
 
-            $product = $query->firstOrFail();
+            $magentoProducts = $magentoResponse['items'];
+            $totalInMagento  = $magentoResponse['total_count'] ?? count($magentoProducts);
 
-            return response()->json([
-                'success' => true,
-                'data'    => new ProductResource($product),
-            ]);
+            if (empty($magentoProducts)) {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'No products found in Magento to sync',
+                    'data'    => [
+                        'total_in_magento' => 0,
+                        'inserted'         => 0,
+                        'skipped'          => 0,
+                        'failed'           => 0,
+                        'errors'           => [],
+                    ],
+                ]);
+            }
 
-        } catch (ModelNotFoundException) {
-            return $this->notFound($vendorId ? 'Product not found for this vendor' : 'Product not found');
-        } catch (Throwable $e) {
-            report($e);
-            return $this->serverError('Failed to fetch product', $e);
-        }
-    }
+            // ── Step 1: Extract all Magento product IDs from the response ──────────
+            $magentoProductIds = array_filter(array_column($magentoProducts, 'id'));
 
-    // -------------------------------------------------------------------------
-    // CREATE
-    // -------------------------------------------------------------------------
+            // ── Step 2: Find which IDs already exist in local DB ──────────────────
+            $existingIds = VendorProduct::where('vendor_id', $vendor->id)
+                ->whereIn('magento_product_id', $magentoProductIds)
+                ->pluck('magento_product_id')
+                ->flip()          // flip to use isset() instead of in_array() — O(1)
+                ->toArray();
 
-    /**
-     * POST /admin/products
-     * POST /admin/vendors/{vendorId}/products
-     *
-     * Write flow: Magento first → local VendorProduct with magento reference
-     */
-    public function store(Request $request, ?int $vendorId = null): JsonResponse
-    {
-        try {
-            // Route param overrides body — prevents spoofing vendor_id via payload
-            if ($vendorId) {
-                $request->merge(['vendor_id' => $vendorId]);
+            // ── Step 3: Get vendor store ID once (not inside the loop) ────────────
+            $vendorStoreId = null;
+
+            if ($request->has('store_uuid')) {
+                $store = \App\Models\Vendor\VendorStore::where('uuid', $request->store_uuid)
+                    ->where('vendor_id', $vendor->id)
+                    ->first();
+                $vendorStoreId = $store?->id;
+            }
+
+            if (!$vendorStoreId) {
+                $vendorStoreId = \App\Models\Vendor\VendorStore::where('vendor_id', $vendor->id)
+                    ->value('id');
             }
 
             $validated = $request->validate([
@@ -169,64 +181,130 @@ class AdminProductController extends Controller
                 'seo_data'           => 'nullable|array',
             ]);
 
-            $product = $this->productService->createAdminProduct($validated, Auth::id());
+            $product = $this->productService->createAdminProduct($validated, auth()->id());
 
             return response()->json([
                 'success' => true,
-                'message' => 'Product created in Magento and linked in Laravel successfully',
-                'data'    => new ProductResource($product->load(['vendor', 'store', 'draft'])),
-            ], 201);
+                'message' => "Sync complete: {$insertedCount} inserted, {$skippedCount} skipped (already exist), {$failedCount} failed. Total in Magento: {$totalInMagento}.",
+                'data'    => [
+                    'total_in_magento' => $totalInMagento,
+                    'inserted'         => $insertedCount,
+                    'skipped'          => $skippedCount,
+                    'failed'           => $failedCount,
+                    'errors'           => $errors,
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('fetchAllProducts sync failed', [
+                'vendor_uuid' => $vendorUuid,
+                'error'       => $e->getMessage(),
+            ]);
 
-        } catch (ValidationException $e) {
-            return $this->validationError($e);
-        } catch (Throwable $e) {
-            report($e);
-            return $this->serverError('Failed to create product', $e);
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to sync products: ' . $e->getMessage(),
+            ], 500);
         }
     }
 
-    // -------------------------------------------------------------------------
-    // UPDATE
-    // -------------------------------------------------------------------------
+    /**
+     * GET /api/vendor/{vendor_uuid}/products/{product_uuid}
+     * Get single product (READ FROM LOCAL DB ONLY)
+     */
+    public function show(string $vendorUuid, string $productUuid)
+    {
+        $vendor = $this->getVendor($vendorUuid);
+
+        $product = VendorProduct::where('vendor_id', $vendor->id)
+            ->where('uuid', $productUuid)
+            ->first();
+
+        if (!$product) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Product not found'
+            ], 404);
+        }
+
+        // Add complete product data
+        $product->product_data = $product->complete_product_data;
+
+        return response()->json([
+            'success' => true,
+            'data' => $product,
+            'message' => 'Product retrieved successfully'
+        ]);
+    }
 
     /**
-     * PUT /admin/products/{uuid}
-     * PUT /admin/vendors/{vendorId}/products/{uuid}
-     *
-     * Write flow: Magento first → local VendorProduct updated with new magento reference
+     * Store product - Routes to appropriate handler based on type
      */
-    public function update(Request $request, string $uuid, ?int $vendorId = null): JsonResponse
+    public function store(CreateProductRequest $request, string $vendorUuid)
     {
-        try {
-            $query = VendorProduct::where('uuid', $uuid);
+        $vendor = $this->getVendor($vendorUuid);
 
-            if ($vendorId) {
-                $query->where('vendor_id', $vendorId);
+        // Generate SKU if not provided or sanitize
+        $generatedSku = Str::upper(Str::slug($request->sku, '-'));
+        $request->merge(['sku' => $generatedSku]);
+
+        // Get vendor store ID
+        $vendorStoreId = $this->getVendorStoreId($vendor, $request);
+
+        if (!$vendorStoreId) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No store found for this vendor. Please create a store first.'
+            ], 400);
+        }
+
+        $magentoService = $this->initMagentoService($vendor);
+        $validatedData = $request->validated();
+        $productType = $validatedData['type_id'];
+
+        DB::beginTransaction();
+
+        try {
+            // Route to appropriate product type handler
+            $magentoResponse = match ($productType) {
+                'configurable' => $this->createConfigurableProduct($magentoService, $validatedData),
+                'grouped' => $this->createGroupedProduct($magentoService, $validatedData),
+                'bundle' => $this->createBundleProduct($magentoService, $validatedData),
+                'downloadable' => $this->createDownloadableProduct($magentoService, $validatedData),
+                'virtual' => $this->createVirtualProduct($magentoService, $validatedData),
+                'giftcard' => $this->createGiftCardProduct($magentoService, $validatedData),
+                default => $this->createSimpleProduct($magentoService, $validatedData),
+            };
+
+            if (!$magentoResponse['success']) {
+                throw new \Exception($magentoResponse['message'] ?? 'Magento product creation failed');
             }
 
-            $product = $query->firstOrFail();
-
-            $validated = $request->validate([
-                'sku'               => [
-                    'nullable', 'string', 'max:255',
-                    Rule::unique('vendor_products', 'sku')
-                        ->where(fn ($q) => $q->where('vendor_id', $product->vendor_id))
-                        ->ignore($product->id),
-                ],
-                'name'              => 'nullable|string|max:500',
-                'description'       => 'nullable|string',
-                'short_description' => 'nullable|string',
-                'price'             => 'nullable|numeric|min:0',
-                'status'            => 'nullable|in:active,inactive',
-                'quantity'          => 'nullable|integer|min:0',
-                'weight'            => 'nullable|numeric|min:0',
-                'categories'        => 'nullable|array',
-                'attributes'        => 'nullable|array',
-                'media_gallery'     => 'nullable|array',
-                'seo_data'          => 'nullable|array',
+            // Save to local database
+            $product = VendorProduct::create([
+                'vendor_id' => $vendor->id,
+                'vendor_store_id' => $vendorStoreId,
+                'magento_product_id' => $magentoResponse['product']['id'] ?? null,
+                'magento_sku' => $magentoResponse['sku'],
+                'sku' => $generatedSku,
+                'name' => $validatedData['name'],
+                'type_id' => $productType,
+                'attribute_set_id' => $validatedData['attribute_set_id'] ?? 4,
+                'price' => $validatedData['price'] ?? 0,
+                'quantity' => $validatedData['quantity'] ?? 0,
+                'status' => $validatedData['status'] ?? true,
+                'full_product_data' => $validatedData,
+                'sync_status' => 'synced',
+                'last_synced_at' => now(),
+                'metadata' => json_encode([
+                    'created_from' => 'api',
+                    'magento_response' => $magentoResponse,
+                    'ip_address' => $request->ip(),
+                ]),
             ]);
 
-            $product = $this->productService->updateAdminProduct($product, $validated, Auth::id());
+            DB::commit();
+
+            $product = $this->productService->updateAdminProduct($product, $validated, auth()->id());
 
             return response()->json([
                 'success' => true,
@@ -266,7 +344,7 @@ class AdminProductController extends Controller
 
             $product = $query->firstOrFail();
 
-            $result = $this->productService->deleteAdminProduct($product, Auth::id());
+            $result = $this->productService->deleteAdminProduct($product, auth()->id());
 
             if ($result['blocked']) {
                 return response()->json([
@@ -361,7 +439,7 @@ class AdminProductController extends Controller
             }
 
             // Transaction lives inside productService->approveProduct
-            $product = $this->productService->approveProduct($draft, Auth::id(), $validated['notes'] ?? null);
+            $product = $this->productService->approveProduct($draft, auth()->id(), $validated['notes'] ?? null);
 
             return response()->json([
                 'success' => true,
@@ -373,7 +451,7 @@ class AdminProductController extends Controller
                     'magento_sku'        => $product->magento_sku,
                     'draft_id'           => $draft->id,
                     'status'             => 'approved',
-                    'approved_by'        => Auth::id(),
+                    'approved_by'        => auth()->id(),
                     'approved_at'        => now(),
                 ],
             ]);
@@ -389,7 +467,7 @@ class AdminProductController extends Controller
     }
 
     /**
-     * POST /admin/products/drafts/{id}/reject
+     * Create Bundle Product
      */
     public function reject(Request $request, int $id): JsonResponse
     {
@@ -409,7 +487,7 @@ class AdminProductController extends Controller
             }
 
             // Transaction lives inside productService->rejectProduct
-            $this->productService->rejectProduct($draft, Auth::id(), $validated['reason']);
+            $this->productService->rejectProduct($draft, auth()->id(), $validated['reason']);
 
             return response()->json([
                 'success' => true,
@@ -418,7 +496,7 @@ class AdminProductController extends Controller
                     'draft_id'    => $draft->id,
                     'status'      => 'rejected',
                     'reason'      => $validated['reason'],
-                    'rejected_by' => Auth::id(),
+                    'rejected_by' => auth()->id(),
                     'rejected_at' => now(),
                 ],
             ]);
@@ -453,7 +531,7 @@ class AdminProductController extends Controller
                 ], 422);
             }
 
-            $this->productService->requestModification($draft, Auth::id(), $validated['notes']);
+            $this->productService->requestModification($draft, auth()->id(), $validated['notes']);
 
             return response()->json([
                 'success' => true,
@@ -462,7 +540,7 @@ class AdminProductController extends Controller
                     'draft_id'      => $draft->id,
                     'status'        => 'needs_modification',
                     'notes'         => $validated['notes'],
-                    'requested_by'  => Auth::id(),
+                    'requested_by'  => auth()->id(),
                     'requested_at'  => now(),
                 ],
             ]);
@@ -478,7 +556,7 @@ class AdminProductController extends Controller
     }
 
     /**
-     * POST /admin/products/drafts/bulk-approve
+     * Build Magento API payload
      */
     public function bulkApprove(Request $request): JsonResponse
     {
@@ -508,7 +586,7 @@ class AdminProductController extends Controller
                         continue;
                     }
 
-                    $this->productService->approveProduct($draft, Auth::id(), $validated['notes'] ?? null);
+                    $this->productService->approveProduct($draft, auth()->id(), $validated['notes'] ?? null);
                     $results['approved'][] = $draftId;
 
                 } catch (Throwable $e) {
@@ -598,99 +676,193 @@ class AdminProductController extends Controller
             ];
 
             return response()->json([
-                'success'      => true,
-                'data'         => $stats,
-                'generated_at' => now(),
+                'success' => true,
+                'data' => $options,
+                'message' => 'Attribute options retrieved successfully'
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to fetch attribute options', [
+                'vendor_uuid' => $vendorUuid,
+                'attribute_id' => $attributeId,
+                'error' => $e->getMessage()
             ]);
 
-        } catch (Throwable $e) {
-            report($e);
-            return $this->serverError('Failed to fetch statistics', $e);
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // FEATURE / UNFEATURE  (stubs — ready to implement)
-    // -------------------------------------------------------------------------
-
-    /**
-     * POST /admin/products/{uuid}/feature
-     */
-    public function feature(string $uuid): JsonResponse
-    {
-        try {
-            $product = VendorProduct::where('uuid', $uuid)->firstOrFail();
-
-            if ($product->status !== 'active') {
-                return response()->json([
-                    'success'        => false,
-                    'message'        => 'Only active products can be featured',
-                    'current_status' => $product->status,
-                ], 422);
-            }
-
-            // TODO: $product->update(['is_featured' => true]);
             return response()->json([
                 'success' => false,
-                'message' => 'Product featuring is not implemented yet',
-                'product_id' => $product->uuid,
-            ], 501);
-
-        } catch (ModelNotFoundException) {
-            return $this->notFound('Product not found');
-        } catch (Throwable $e) {
-            report($e);
-            return $this->serverError('Failed to feature product', $e);
+                'message' => 'Failed to fetch attribute options: ' . $e->getMessage()
+            ], 500);
         }
     }
 
     /**
-     * POST /admin/products/{uuid}/unfeature
+     * GET /api/by-vendor/{vendor_uuid}/products/attributes
+     * Get all product attributes
      */
-    public function unfeature(string $uuid): JsonResponse
+    public function getAllAttributes(string $vendorUuid)
     {
+        $vendor = $this->getVendor($vendorUuid);
+        $productService = $this->initMagentoService($vendor);
+
         try {
-            $product = VendorProduct::where('uuid', $uuid)->firstOrFail();
+            $attributes = $productService->getProductAttributes();
 
-            // TODO: $product->update(['is_featured' => false]);
             return response()->json([
-                'success'    => false,
-                'message'    => 'Product unfeaturing is not implemented yet',
-                'product_id' => $product->uuid,
-            ], 501);
-
-        } catch (ModelNotFoundException) {
-            return $this->notFound('Product not found');
-        } catch (Throwable $e) {
-            report($e);
-            return $this->serverError('Failed to unfeature product', $e);
+                'success' => true,
+                'data' => $attributes,
+                'message' => 'Attributes retrieved successfully'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch attributes: ' . $e->getMessage()
+            ], 500);
         }
     }
 
-    // -------------------------------------------------------------------------
-    // PRIVATE HELPERS
-    // -------------------------------------------------------------------------
-
-    private function notFound(string $message): JsonResponse
+    /**
+     * GET /api/by-vendor/{vendor_uuid}/products/attributes/{attributeId}
+     * Get specific attribute details
+     */
+    public function getAttribute(string $vendorUuid, int $attributeId)
     {
-        return response()->json(['success' => false, 'message' => $message], 404);
+        $vendor = $this->getVendor($vendorUuid);
+        $productService = $this->initMagentoService($vendor);
+
+        try {
+            $attribute = $productService->getAttribute($attributeId);
+
+            return response()->json([
+                'success' => true,
+                'data' => $attribute,
+                'message' => 'Attribute retrieved successfully'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch attribute: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
-    private function validationError(ValidationException $e): JsonResponse
+    /**
+     * PUT /api/vendor/{vendor_uuid}/products/{product_uuid}
+     * Update product (WRITE TO MAGENTO API + UPDATE LOCAL DB)
+     */
+    public function update(UpdateProductRequest $request, string $vendorUuid, string $productUuid)
     {
-        return response()->json([
-            'success' => false,
-            'message' => 'Validation failed',
-            'errors'  => $e->errors(),
-        ], 422);
+        $vendor = $this->getVendor($vendorUuid);
+
+        $product = VendorProduct::where('vendor_id', $vendor->id)
+            ->where('uuid', $productUuid)
+            ->first();
+
+        if (!$product) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Product not found'
+            ], 404);
+        }
+
+        DB::beginTransaction();
+
+        try {
+            $product->update(['sync_status' => 'updating']);
+
+            $magentoService = $this->initMagentoService($vendor);
+            $updateData = $this->buildUpdatePayload($request->validated(), $product->full_product_data ?? []);
+
+            if (!empty($updateData)) {
+                $magentoService->updateProduct($product->sku, $updateData);
+            }
+
+            $this->handleAdditionalUpdates($magentoService, $product->sku, $request->validated());
+
+            $updateFields = $this->prepareLocalUpdateFields($request->validated());
+            $existingData = $product->full_product_data ?? [];
+            $updatedFullData = array_merge($existingData, $this->buildMagentoPayload($request->validated()));
+
+            $updateFields['full_product_data'] = $updatedFullData;
+            $updateFields['sync_status'] = 'synced';
+            $updateFields['last_synced_at'] = now();
+
+            $product->update($updateFields);
+
+            DB::commit();
+
+            $product->product_data = $product->complete_product_data;
+
+            return response()->json([
+                'success' => true,
+                'data' => $product,
+                'message' => 'Product updated successfully'
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            $product->update([
+                'sync_status' => 'failed',
+                'sync_errors' => json_encode(['update_error' => $e->getMessage()])
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Product update failed: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
-    private function serverError(string $message, Throwable $e): JsonResponse
+    /**
+     * POST /api/vendor/{vendor_uuid}/products/sync/{product_uuid}
+     * Force sync single product to Magento
+     */
+    public function forceSync(string $vendorUuid, string $productUuid)
     {
-        return response()->json([
-            'success' => false,
-            'message' => $message,
-            'error'   => config('app.debug') ? $e->getMessage() : 'Internal server error',
-        ], 500);
+        $vendor = $this->getVendor($vendorUuid);
+
+        $product = VendorProduct::where('vendor_id', $vendor->id)
+            ->where('uuid', $productUuid)
+            ->first();
+
+        if (!$product) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Product not found'
+            ], 404);
+        }
+
+        try {
+            $magentoService = $this->initMagentoService($vendor);
+            $productData = $product->complete_product_data;
+            $existingProduct = $magentoService->getProductBySku($product->sku);
+
+            if ($existingProduct) {
+                $updatePayload = $this->buildUpdatePayload($productData, $productData);
+                $magentoService->updateProduct($product->sku, $updatePayload);
+            } else {
+                $magentoPayload = $this->buildMagentoPayload($productData);
+                $magentoService->createProduct($magentoPayload);
+            }
+
+            $product->update([
+                'sync_status' => 'synced',
+                'last_synced_at' => now(),
+                'sync_errors' => null,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Product synced successfully'
+            ]);
+        } catch (\Exception $e) {
+            $product->update([
+                'sync_status' => 'failed',
+                'sync_errors' => json_encode(['sync_error' => $e->getMessage()]),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Sync failed: ' . $e->getMessage()
+            ], 500);
+        }
     }
 }

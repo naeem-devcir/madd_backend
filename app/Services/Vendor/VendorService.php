@@ -13,7 +13,7 @@ use App\Services\Integration\MagentoService;
 use App\Services\Store\StoreService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-
+use Illuminate\Support\Facades\Cache;
 
 class VendorService
 {
@@ -199,4 +199,36 @@ class VendorService
     {
         return MagentoService::forVendor($vendor);
     }
+<<<<<<< HEAD
+=======
+
+        /**
+     * Get vendor by UUID with caching
+     */
+    public function getVendorByUuid(string $uuid): ?Vendor
+    {
+        return Cache::remember("vendor:uuid:{$uuid}", 3600, function () use ($uuid) {
+            return Vendor::where('uuid', $uuid)->first();
+        });
+    }
+    
+    /**
+     * Get vendor by ID
+     */
+    public function getVendorById(int $id): ?Vendor
+    {
+        return Cache::remember("vendor:id:{$id}", 3600, function () use ($id) {
+            return Vendor::find($id);
+        });
+    }
+    
+    /**
+     * Clear vendor cache
+     */
+    public function clearVendorCache(Vendor $vendor): void
+    {
+        Cache::forget("vendor:uuid:{$vendor->uuid}");
+        Cache::forget("vendor:id:{$vendor->id}");
+    }
+>>>>>>> ed6c091e3f7981a057470097acbb7779e169584f
 }

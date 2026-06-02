@@ -1,24 +1,18 @@
 <?php
+// app/Services/Product/ProductService.php
 
 namespace App\Services\Product;
 
-use App\Models\Product\ProductDraft;
-use App\Models\Product\ProductApproval;
-use App\Models\Product\VendorProduct;
-use App\Models\Vendor\Vendor;
-use App\Models\Vendor\VendorStore;
 use App\Services\Integration\MagentoService;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Cache;
 
 class ProductService
 {
-    /**
-     * Get Magento service instance for a specific vendor
-     */
-    private function getMagentoServiceForVendor(Vendor $vendor): MagentoService
+    protected $magentoService;
+
+    public function __construct(MagentoService $magentoService)
     {
-        return MagentoService::forVendor($vendor);
+        $this->magentoService = $magentoService;
     }
 
     /**
@@ -29,6 +23,7 @@ class ProductService
         $draft->status = 'pending';
         $draft->save();
 
+        // Create approval record
         ProductApproval::create([
             'product_draft_id' => $draft->id,
             'vendor_id' => $draft->vendor_id,
@@ -37,6 +32,7 @@ class ProductService
             'status' => 'pending',
         ]);
 
+        // Notify admins
         \App\Jobs\Notification\SendProductApprovalNotification::dispatch($draft);
     }
 
@@ -50,14 +46,17 @@ class ProductService
         try {
             $draft->loadMissing('vendor', 'store', 'product');
 
+            // Update draft status
             $draft->status = 'approved';
             $draft->reviewed_by = $adminId;
             $draft->reviewed_at = now();
             $draft->review_notes = $notes;
             $draft->save();
 
-            $magentoProduct = $this->createOrUpdateProductInMagento($draft);
+            // Sync to Magento
+            $magentoProduct = $this->magentoForVendor($draft->vendor)->createOrUpdateProduct($draft);
 
+            // Create or update vendor product record
             if ($draft->vendor_product_id) {
                 $product = $draft->product;
                 $product->update([
@@ -93,13 +92,15 @@ class ProductService
                         'created_by_admin_id' => $adminId,
                     ],
                 ]);
-
+                
                 $draft->vendor_product_id = $product->id;
             }
 
+            // $draft->magento_product_id = $magentoProduct['id'];
             $draft->published_at = now();
             $draft->save();
 
+            // Update approval record
             $approval = ProductApproval::where('product_draft_id', $draft->id)->first();
             if ($approval) {
                 $approval->status = 'approved';
@@ -111,10 +112,14 @@ class ProductService
 
             DB::commit();
 
+            // Dispatch event
             event(new \App\Events\Product\ProductApproved($product, $draft));
+
+            // Notify vendor
             \App\Jobs\Notification\SendProductApprovedNotification::dispatch($product);
 
             return $product;
+
         } catch (\Exception $e) {
             DB::rollBack();
             throw $e;
@@ -144,7 +149,9 @@ class ProductService
 
             DB::commit();
 
+            // Notify vendor
             \App\Jobs\Notification\SendProductRejectedNotification::dispatch($draft, $reason);
+
         } catch (\Exception $e) {
             DB::rollBack();
             throw $e;
@@ -154,7 +161,7 @@ class ProductService
     /**
      * Request modification for product draft
      */
-    public function requestModification(ProductDraft $draft, int $adminId, string $notes): void
+    public function createGroupedProduct(array $formData): array
     {
         DB::beginTransaction();
 
@@ -174,15 +181,17 @@ class ProductService
 
             DB::commit();
 
+            // Notify vendor
             \App\Jobs\Notification\SendProductModificationRequestNotification::dispatch($draft, $notes);
+
         } catch (\Exception $e) {
-            DB::rollBack();
-            throw $e;
+            Log::error('Grouped Product Creation Failed: ' . $e->getMessage());
+            throw new Exception('Grouped product creation failed: ' . $e->getMessage());
         }
     }
 
     /**
-     * Create new version of product draft
+     * Create Bundle Product
      */
     public function createNewVersion(ProductDraft $draft): ProductDraft
     {
@@ -213,20 +222,14 @@ class ProductService
             'weight' => 'nullable|numeric|min:0',
             'categories' => 'nullable|array',
             'images' => 'nullable|array|max:10',
-            'images.*' => 'image|max:5120',
+            'images.*' => 'image|max:5120', // 5MB per image
         ];
     }
 
-    /**
-     * Create product directly by admin (bypasses approval)
-     */
     public function createAdminProduct(array $data, int $adminId): VendorProduct
     {
         $vendor = Vendor::findOrFail($data['vendor_id']);
         $store = VendorStore::where('vendor_id', $vendor->getKey())->findOrFail($data['vendor_store_id']);
-
-        // Store all Magento-specific fields in product_data
-        $productData = $data['product_data'] ?? [];
 
         $draft = new ProductDraft([
             'vendor_id' => $vendor->getKey(),
@@ -241,7 +244,7 @@ class ProductService
             'special_price_to' => $data['special_price_to'] ?? null,
             'quantity' => $data['quantity'] ?? 0,
             'weight' => $data['weight'] ?? 0,
-            'product_data' => $data, // This now contains ALL fields including type_id, attribute_set_id, etc.
+            'product_data' => $data,
             'media_gallery' => $data['media_gallery'] ?? null,
             'categories' => $data['categories'] ?? null,
             'attributes' => $data['attributes'] ?? null,
@@ -255,18 +258,9 @@ class ProductService
         $draft->setRelation('vendor', $vendor);
         $draft->setRelation('store', $store);
 
-        // REMOVE these lines - they don't exist in product_drafts table:
-        // $draft->type_id = $data['type_id'] ?? 'simple';
-        // $draft->attribute_set_id = $data['attribute_set_id'] ?? 4;
-        // $draft->visibility = $data['visibility'] ?? 4;
-
-        $magentoProduct = $this->createOrUpdateProductInMagento($draft);
+        $magentoProduct = $this->magentoForVendor($vendor)->createOrUpdateProduct($draft);
 
         return DB::transaction(function () use ($draft, $magentoProduct, $adminId, $data) {
-            // Get Magento-specific fields from product_data or top level
-            $typeId = $data['type_id'] ?? $data['product_data']['type_id'] ?? 'simple';
-            $attributeSetId = $data['attribute_set_id'] ?? $data['product_data']['attribute_set_id'] ?? 4;
-
             $product = VendorProduct::create([
                 'vendor_id' => $draft->vendor_id,
                 'vendor_store_id' => $draft->vendor_store_id,
@@ -274,8 +268,8 @@ class ProductService
                 'magento_sku' => $magentoProduct['sku'],
                 'sku' => $draft->sku,
                 'name' => $draft->name,
-                'type_id' => $magentoProduct['type_id'] ?? $typeId,
-                'attribute_set_id' => $magentoProduct['attribute_set_id'] ?? $attributeSetId,
+                'type_id' => $magentoProduct['type_id'] ?? 'simple',
+                'attribute_set_id' => $magentoProduct['attribute_set_id'] ?? 4,
                 'price' => $draft->price,
                 'quantity' => $draft->quantity,
                 'status' => $data['status'] ?? 'active',
@@ -284,20 +278,17 @@ class ProductService
                 'metadata' => [
                     'magento' => $magentoProduct,
                     'created_by_admin_id' => $adminId,
-                    'full_payload' => $data,
                 ],
             ]);
 
             $draft->vendor_product_id = $product->id;
+            // $draft->magento_product_id = $magentoProduct['id'];
             $draft->save();
 
             return $product;
         });
     }
 
-    /**
-     * Update product directly by admin (bypasses approval)
-     */
     public function updateAdminProduct(VendorProduct $product, array $data, int $adminId): VendorProduct
     {
         $product->loadMissing('vendor', 'store');
@@ -319,16 +310,18 @@ class ProductService
             'attributes' => $data['attributes'] ?? $product->draft?->attributes,
             'seo_data' => $data['seo_data'] ?? $product->draft?->seo_data,
             'status' => 'approved',
+            // 'magento_product_id' => $product->magento_product_id,
             'reviewed_by' => $adminId,
             'reviewed_at' => now(),
             'published_at' => now(),
         ]);
 
+        // $draft->magento_sku = $product->magento_sku;
         $draft->setRelation('vendor', $product->vendor);
         $draft->setRelation('store', $product->store);
         $draft->setRelation('product', $product);
 
-        $magentoProduct = $this->createOrUpdateProductInMagento($draft);
+        $magentoProduct = $this->magentoForVendor($product->vendor)->createOrUpdateProduct($draft);
 
         return DB::transaction(function () use ($product, $draft, $magentoProduct, $adminId, $data) {
             $product->update([
@@ -348,29 +341,128 @@ class ProductService
             ]);
 
             $draft->vendor_product_id = $product->id;
+            // $draft->magento_product_id = $product->magento_product_id;
             $draft->save();
 
             return $product->refresh();
         });
     }
 
-    /**
-     * Delete product from admin
-     */
     public function deleteAdminProduct(VendorProduct $product, int $adminId): array
     {
-        $product->loadMissing('vendor');
+        $payload = [
+            'link' => [
+                'title' => $links[0]['title'] ?? 'Download',
+                'price' => 0,
+                'is_shareable' => 1,
+                'sample' => [
+                    'type' => 'file',
+                ],
+            ],
+            'links' => array_map(function ($link, $index) {
+                return [
+                    'title' => $link['title'],
+                    'sort_order' => $link['sort_order'] ?? $index,
+                    'is_shareable' => $link['is_shareable'] ?? 1,
+                    'price' => (float)($link['price'] ?? 0),
+                    'number_of_downloads' => (int)($link['number_of_downloads'] ?? 0),
+                    'link_type' => $link['link_type'] ?? 'file',
+                    'link_file' => $link['link_type'] === 'file' ? ($link['link_file'] ?? '') : null,
+                    'link_url' => $link['link_type'] === 'url' ? ($link['link_url'] ?? '') : null,
+                    'sample_type' => $link['sample_type'] ?? 'file',
+                    'sample_file' => $link['sample_type'] === 'file' ? ($link['sample_file'] ?? '') : null,
+                    'sample_url' => $link['sample_type'] === 'url' ? ($link['sample_url'] ?? '') : null,
+                ];
+            }, $links, array_keys($links)),
+        ];
 
-        if ($product->orderItems()->exists()) {
-            return [
-                'deleted' => false,
-                'blocked' => true,
-                'reason' => 'Cannot delete product with existing orders',
-                'order_count' => $product->orderItems()->count(),
+        $this->magento->post("products/{$sku}/downloadable-links", $payload);
+    }
+
+    protected function addDownloadableSamples(string $sku, array $samples): void
+    {
+        $payload = [
+            'samples' => array_map(function ($sample, $index) {
+                return [
+                    'title' => $sample['title'],
+                    'sort_order' => $sample['sort_order'] ?? $index,
+                    'sample_type' => $sample['sample_type'] ?? 'file',
+                    'sample_file' => $sample['sample_type'] === 'file' ? ($sample['sample_file'] ?? '') : null,
+                    'sample_url' => $sample['sample_type'] === 'url' ? ($sample['sample_url'] ?? '') : null,
+                ];
+            }, $samples, array_keys($samples)),
+        ];
+
+        $this->magento->post("products/{$sku}/downloadable-links/samples", $payload);
+    }
+
+    // ============ GIFT CARD HELPER METHODS ============
+
+    protected function buildGiftCardPayload(array $data): array
+    {
+        $payload = [
+            'product' => [
+                'sku' => $data['sku'],
+                'name' => $data['name'],
+                'attribute_set_id' => (int)($data['attribute_set_id'] ?? 4),
+                'status' => (int)($data['status'] ?? 1),
+                'visibility' => (int)($data['visibility'] ?? 4),
+                'type_id' => 'giftcard',
+                'price' => (float)($data['price'] ?? 0),
+                'extension_attributes' => [
+                    'website_ids' => $data['website_ids'] ?? [1],
+                ],
+                'custom_attributes' => $this->buildCustomAttributes($data),
+            ],
+        ];
+
+        // Add gift card-specific custom attributes
+        $giftCardAttributes = [];
+
+        if (isset($data['giftcard_type'])) {
+            $giftCardAttributes[] = [
+                'attribute_code' => 'giftcard_type',
+                'value' => $data['giftcard_type'],
             ];
         }
 
-        $magentoResult = $this->deleteProductFromMagento($product);
+        if (isset($data['giftcard_amount_type'])) {
+            $giftCardAttributes[] = [
+                'attribute_code' => 'giftcard_amount_type',
+                'value' => $data['giftcard_amount_type'],
+            ];
+        }
+
+        if ($data['giftcard_amount_type'] === 'dynamic') {
+            if (isset($data['giftcard_open_amount_min'])) {
+                $giftCardAttributes[] = [
+                    'attribute_code' => 'giftcard_open_amount_min',
+                    'value' => (string) $data['giftcard_open_amount_min'],
+                ];
+            }
+            if (isset($data['giftcard_open_amount_max'])) {
+                $giftCardAttributes[] = [
+                    'attribute_code' => 'giftcard_open_amount_max',
+                    'value' => (string) $data['giftcard_open_amount_max'],
+                ];
+            }
+        }
+
+        if (isset($data['allow_message'])) {
+            $giftCardAttributes[] = [
+                'attribute_code' => 'allow_message',
+                'value' => $data['allow_message'] ? '1' : '0',
+            ];
+        }
+
+        if (isset($data['gift_message_max_length'])) {
+            $giftCardAttributes[] = [
+                'attribute_code' => 'gift_message_max_length',
+                'value' => (string) $data['gift_message_max_length'],
+            ];
+        }
+
+        $magentoResult = $this->magentoForVendor($product->vendor)->deleteProduct($product->magento_sku ?: $product->sku);
 
         DB::transaction(function () use ($product, $adminId, $magentoResult) {
             $product->update([
@@ -394,500 +486,11 @@ class ProductService
         ];
     }
 
-    /**
-     * Sync product stock to Magento
-     */
-    public function syncStock(VendorProduct $product): array
+    private function magentoForVendor(Vendor $vendor): MagentoService
     {
-        $vendor = $product->vendor;
-        if (!$vendor || !$vendor->id) {
-            throw new \Exception('Product has no associated vendor');
-        }
-
-        $magentoService = $this->getMagentoServiceForVendor($vendor);
-        $sku = $product->magento_sku ?: $product->sku;
-
-        return $magentoService->put('products/' . rawurlencode($sku) . '/stockItems/1', [
-            'stockItem' => [
-                'qty' => (int) $product->quantity,
-                'is_in_stock' => $product->quantity > 0
-            ]
-        ]);
+        return new MagentoService($vendor);
     }
 
-    /**
-     * Get products from Magento with filters
-     */
-    public function getProductsFromMagento(Vendor $vendor, array $filters = [], int $page = 1, int $size = 20): array
-    {
-        $magentoService = $this->getMagentoServiceForVendor($vendor);
-
-        $params = [
-            'searchCriteria[currentPage]' => $page,
-            'searchCriteria[pageSize]' => $size,
-        ];
-
-        if (!empty($filters['category_id'])) {
-            $params['searchCriteria[filterGroups][0][filters][0][field]'] = 'category_id';
-            $params['searchCriteria[filterGroups][0][filters][0][value]'] = $filters['category_id'];
-            $params['searchCriteria[filterGroups][0][filters][0][conditionType]'] = 'eq';
-        }
-
-        if (!empty($filters['price_from'])) {
-            $params['searchCriteria[filterGroups][1][filters][0][field]'] = 'price';
-            $params['searchCriteria[filterGroups][1][filters][0][value]'] = $filters['price_from'];
-            $params['searchCriteria[filterGroups][1][filters][0][conditionType]'] = 'gteq';
-        }
-
-        if (!empty($filters['price_to'])) {
-            $params['searchCriteria[filterGroups][2][filters][0][field]'] = 'price';
-            $params['searchCriteria[filterGroups][2][filters][0][value]'] = $filters['price_to'];
-            $params['searchCriteria[filterGroups][2][filters][0][conditionType]'] = 'lteq';
-        }
-
-        return $magentoService->get('products', $params);
-    }
-
-    /**
-     * Get single product from Magento by SKU
-     */
-    public function getProductFromMagento(Vendor $vendor, string $sku): array
-    {
-        $magentoService = $this->getMagentoServiceForVendor($vendor);
-        return $magentoService->get('products/' . rawurlencode($sku));
-    }
-
-    // ─────────────────────────────────────────────────────
-    // PRIVATE HELPER METHODS
-    // ─────────────────────────────────────────────────────
-
-    /**
-     * Create or update product in Magento
-     */
-    private function createOrUpdateProductInMagento(ProductDraft|VendorProduct $product): array
-    {
-        // Get the vendor from the product
-        $vendor = $product->vendor;
-        if (!$vendor || !$vendor->id) {
-            throw new \Exception('Product has no associated vendor');
-        }
-
-        // Create service for this specific vendor
-        $magentoService = $this->getMagentoServiceForVendor($vendor);
-
-        $payload = $this->buildProductPayload($product);
-
-        if (!empty($product->magento_product_id) || !empty($product->magento_sku)) {
-            return $magentoService->put(
-                'products/' . rawurlencode($product->magento_sku ?: $product->sku),
-                ['product' => $payload]
-            );
-        }
-
-        return $magentoService->post('products', ['product' => $payload]);
-    }
-
-    /**
-     * Delete product from Magento
-     */
-    private function deleteProductFromMagento(VendorProduct $product): array
-    {
-        $vendor = $product->vendor;
-        if (!$vendor || !$vendor->id) {
-            throw new \Exception('Product has no associated vendor');
-        }
-
-        $magentoService = $this->getMagentoServiceForVendor($vendor);
-        $sku = $product->magento_sku ?: $product->sku;
-
-        return $magentoService->delete('products/' . rawurlencode($sku));
-    }
-
-    /**
-     * Build product payload for Magento API
-     */
-    private function buildProductPayload(ProductDraft|VendorProduct $product): array
-    {
-        $vendor = $product->vendor;
-        if (!$vendor || !$vendor->id) {
-            throw new \Exception('Cannot build product payload: No vendor associated');
-        }
-
-        // Get the full product data from product_data JSON field
-        $productData = $product instanceof ProductDraft
-            ? ($product->product_data ?? [])
-            : ($product->metadata['full_payload'] ?? []);
-
-        $attributes = is_array($product->attributes ?? null) ? $product->attributes : [];
-
-        // Get Magento-specific fields from product_data
-        $typeId = $productData['type_id'] ?? $product->type_id ?? 'simple';
-        $attributeSetId = $productData['attribute_set_id'] ?? $product->attribute_set_id ?? 4;
-        $visibility = $productData['visibility'] ?? 4;
-
-        $requestedStatus = $product instanceof ProductDraft
-            ? data_get($product->product_data, 'status', 'active')
-            : ($product->status ?? 'active');
-
-        $payload = [
-            'sku' => $product->sku,
-            'name' => $product->name,
-            'attribute_set_id' => (int) $attributeSetId,
-            'price' => (float) ($product->price ?? 0),
-            'status' => $requestedStatus === 'inactive' ? 2 : 1,
-            'visibility' => (int) $visibility,
-            'type_id' => $typeId,
-            'weight' => (float) ($product->weight ?? 0),
-            'extension_attributes' => $this->buildExtensionAttributes($product, $vendor, $productData),
-            'product_links' => $productData['product_links'] ?? [],
-            'options' => $productData['options'] ?? [],
-            'media_gallery_entries' => $productData['media_gallery_entries'] ?? [],
-            'tier_prices' => $productData['tier_prices'] ?? [],
-            'custom_attributes' => $this->buildCustomAttributes($product, $vendor, $attributes),
-        ];
-
-        // Add created_at and updated_at if they exist in product_data
-        if (isset($productData['created_at'])) {
-            $payload['created_at'] = $productData['created_at'];
-        }
-
-        if (isset($productData['updated_at'])) {
-            $payload['updated_at'] = $productData['updated_at'];
-        }
-
-        return array_filter($payload, fn($value) => $value !== null);
-    }
-
-    
-    private function buildCustomAttributes(ProductDraft|VendorProduct $product, Vendor $vendor, array $attributes): array
-    {
-        $customAttributes = [
-            ['attribute_code' => 'description', 'value' => $product->description ?? $attributes['description'] ?? ''],
-            ['attribute_code' => 'short_description', 'value' => $product->short_description ?? $attributes['short_description'] ?? ''],
-        ];
-
-        $skipCodes = ['description', 'short_description'];
-
-        foreach ($attributes as $code => $value) {
-            if (in_array($code, $skipCodes, true)) {
-                continue;
-            }
-
-            if (is_array($value)) {
-                $resolvedValues = array_map(
-                    fn($v) => is_int($v) || ctype_digit((string) $v)
-                        ? (int) $v
-                        : $this->resolveOptionId($vendor, $code, (string)$v),
-                    $value
-                );
-
-                $customAttributes[] = [
-                    'attribute_code' => $code,
-                    'value' => implode(',', $resolvedValues),
-                ];
-                continue;
-            }
-
-            $resolvedValue = is_int($value) || ctype_digit((string) $value)
-                ? (int) $value
-                : $this->tryResolveOptionId($vendor, $code, (string)$value);
-
-            $customAttributes[] = [
-                'attribute_code' => $code,
-                'value' => $resolvedValue,
-            ];
-        }
-
-        if (!empty($product->categories) && is_array($product->categories)) {
-            $customAttributes[] = [
-                'attribute_code' => 'category_ids',
-                'value' => array_values($product->categories),
-            ];
-        }
-
-        return $customAttributes;
-    }
-
-    private function buildExtensionAttributes(ProductDraft|VendorProduct $product, Vendor $vendor, array $productData): array
-    {
-        $isNewProduct = empty($product->magento_product_id);
-
-        $extensionAttributes = [
-            'stock_item' => [
-                'item_id' => $isNewProduct ? null : (data_get($productData, 'extension_attributes.stock_item.item_id') ?? $product->magento_product_id),
-                'product_id' => $product->magento_product_id ?? null,
-                'stock_id' => data_get($productData, 'extension_attributes.stock_item.stock_id', 1),
-                'qty' => (int) ($product->quantity ?? 0),
-                'is_in_stock' => ((int) ($product->quantity ?? 0)) > 0,
-                'is_qty_decimal' => data_get($productData, 'extension_attributes.stock_item.is_qty_decimal', false),
-                'show_default_notification_message' => data_get($productData, 'extension_attributes.stock_item.show_default_notification_message', false),
-                'use_config_min_qty' => data_get($productData, 'extension_attributes.stock_item.use_config_min_qty', true),
-                'min_qty' => data_get($productData, 'extension_attributes.stock_item.min_qty', 0),
-                'use_config_min_sale_qty' => data_get($productData, 'extension_attributes.stock_item.use_config_min_sale_qty', 1),
-                'min_sale_qty' => data_get($productData, 'extension_attributes.stock_item.min_sale_qty', 1),
-                'use_config_max_sale_qty' => data_get($productData, 'extension_attributes.stock_item.use_config_max_sale_qty', true),
-                'max_sale_qty' => data_get($productData, 'extension_attributes.stock_item.max_sale_qty', 10000),
-                'use_config_backorders' => data_get($productData, 'extension_attributes.stock_item.use_config_backorders', true),
-                'backorders' => data_get($productData, 'extension_attributes.stock_item.backorders', 0),
-                'use_config_notify_stock_qty' => data_get($productData, 'extension_attributes.stock_item.use_config_notify_stock_qty', true),
-                'notify_stock_qty' => data_get($productData, 'extension_attributes.stock_item.notify_stock_qty', 5),
-                'use_config_qty_increments' => data_get($productData, 'extension_attributes.stock_item.use_config_qty_increments', true),
-                'qty_increments' => data_get($productData, 'extension_attributes.stock_item.qty_increments', 1),
-                'use_config_enable_qty_inc' => data_get($productData, 'extension_attributes.stock_item.use_config_enable_qty_inc', true),
-                'enable_qty_increments' => data_get($productData, 'extension_attributes.stock_item.enable_qty_increments', false),
-                'use_config_manage_stock' => data_get($productData, 'extension_attributes.stock_item.use_config_manage_stock', true),
-                'manage_stock' => data_get($productData, 'extension_attributes.stock_item.manage_stock', true),
-                'low_stock_date' => $isNewProduct ? null : data_get($productData, 'extension_attributes.stock_item.low_stock_date'),
-                'is_decimal_divided' => data_get($productData, 'extension_attributes.stock_item.is_decimal_divided', false),
-                'stock_status_changed_auto' => data_get($productData, 'extension_attributes.stock_item.stock_status_changed_auto', 0),
-            ]
-        ];
-
-        // Filter out null values for new products
-        if ($isNewProduct) {
-            $extensionAttributes['stock_item'] = array_filter(
-                $extensionAttributes['stock_item'],
-                fn($value) => $value !== null
-            );
-        }
-
-        // Add other extension attributes only if they exist
-        if ($websiteIds = data_get($productData, 'extension_attributes.website_ids')) {
-            $extensionAttributes['website_ids'] = $websiteIds;
-        }
-
-        if ($categoryLinks = data_get($productData, 'extension_attributes.category_links')) {
-            $extensionAttributes['category_links'] = $categoryLinks;
-        }
-
-        // Add discounts if present
-        if ($discounts = data_get($productData, 'extension_attributes.discounts')) {
-            $extensionAttributes['discounts'] = $discounts;
-        }
-
-        // Add bundle product options if present
-        if ($bundleOptions = data_get($productData, 'extension_attributes.bundle_product_options')) {
-            $extensionAttributes['bundle_product_options'] = $bundleOptions;
-        }
-
-        // Add downloadable product links if present
-        if ($downloadableLinks = data_get($productData, 'extension_attributes.downloadable_product_links')) {
-            $extensionAttributes['downloadable_product_links'] = $downloadableLinks;
-        }
-
-        // Add downloadable product samples if present
-        if ($downloadableSamples = data_get($productData, 'extension_attributes.downloadable_product_samples')) {
-            $extensionAttributes['downloadable_product_samples'] = $downloadableSamples;
-        }
-
-        // Add giftcard amounts if present
-        if ($giftcardAmounts = data_get($productData, 'extension_attributes.giftcard_amounts')) {
-            $extensionAttributes['giftcard_amounts'] = $giftcardAmounts;
-        }
-
-        // Add configurable product options if present
-        if ($configurableOptions = data_get($productData, 'extension_attributes.configurable_product_options')) {
-            $extensionAttributes['configurable_product_options'] = $configurableOptions;
-        }
-
-        // Add configurable product links if present
-        if ($configurableLinks = data_get($productData, 'extension_attributes.configurable_product_links')) {
-            $extensionAttributes['configurable_product_links'] = $configurableLinks;
-        }
-
-        return $extensionAttributes;
-    }
-
-    private function buildProductLinks(ProductDraft|VendorProduct $product, array $productData): array
-    {
-        $productLinks = [];
-
-        if ($links = data_get($productData, 'product_links')) {
-            foreach ($links as $link) {
-                $productLinks[] = [
-                    'sku' => $link['sku'] ?? '',
-                    'link_type' => $link['link_type'] ?? '',
-                    'linked_product_sku' => $link['linked_product_sku'] ?? '',
-                    'linked_product_type' => $link['linked_product_type'] ?? '',
-                    'position' => $link['position'] ?? 0,
-                    'extension_attributes' => $link['extension_attributes'] ?? ['qty' => 0]
-                ];
-            }
-        }
-
-        return $productLinks;
-    }
-
-    private function buildOptions(ProductDraft|VendorProduct $product, array $productData): array
-    {
-        $options = [];
-
-        if ($customOptions = data_get($productData, 'options')) {
-            foreach ($customOptions as $option) {
-                $formattedOption = [
-                    'product_sku' => $option['product_sku'] ?? $product->sku,
-                    'option_id' => $option['option_id'] ?? 0,
-                    'title' => $option['title'] ?? '',
-                    'type' => $option['type'] ?? '',
-                    'sort_order' => $option['sort_order'] ?? 0,
-                    'is_require' => $option['is_require'] ?? true,
-                    'price' => $option['price'] ?? 0,
-                    'price_type' => $option['price_type'] ?? 'fixed',
-                    'sku' => $option['sku'] ?? '',
-                    'file_extension' => $option['file_extension'] ?? '',
-                    'max_characters' => $option['max_characters'] ?? 0,
-                    'image_size_x' => $option['image_size_x'] ?? 0,
-                    'image_size_y' => $option['image_size_y'] ?? 0,
-                ];
-
-                if (!empty($option['values'])) {
-                    $formattedOption['values'] = [];
-                    foreach ($option['values'] as $value) {
-                        $formattedOption['values'][] = [
-                            'title' => $value['title'] ?? '',
-                            'sort_order' => $value['sort_order'] ?? 0,
-                            'price' => $value['price'] ?? 0,
-                            'price_type' => $value['price_type'] ?? 'fixed',
-                            'sku' => $value['sku'] ?? '',
-                            'option_type_id' => $value['option_type_id'] ?? 0
-                        ];
-                    }
-                }
-
-                $options[] = $formattedOption;
-            }
-        }
-
-        return $options;
-    }
-
-    private function buildMediaGalleryEntries(ProductDraft|VendorProduct $product, array $productData): array
-    {
-        $mediaEntries = [];
-
-        if ($mediaGallery = data_get($productData, 'media_gallery_entries')) {
-            foreach ($mediaGallery as $media) {
-                $entry = [
-                    'id' => $media['id'] ?? 0,
-                    'media_type' => $media['media_type'] ?? 'image',
-                    'label' => $media['label'] ?? '',
-                    'position' => $media['position'] ?? 0,
-                    'disabled' => $media['disabled'] ?? false,
-                    'types' => $media['types'] ?? [],
-                    'file' => $media['file'] ?? '',
-                ];
-
-                if (!empty($media['content'])) {
-                    $entry['content'] = [
-                        'base64_encoded_data' => $media['content']['base64_encoded_data'] ?? '',
-                        'type' => $media['content']['type'] ?? '',
-                        'name' => $media['content']['name'] ?? ''
-                    ];
-                }
-
-                if (!empty($media['extension_attributes']['video_content'])) {
-                    $entry['extension_attributes']['video_content'] = [
-                        'media_type' => $media['extension_attributes']['video_content']['media_type'] ?? '',
-                        'video_provider' => $media['extension_attributes']['video_content']['video_provider'] ?? '',
-                        'video_url' => $media['extension_attributes']['video_content']['video_url'] ?? '',
-                        'video_title' => $media['extension_attributes']['video_content']['video_title'] ?? '',
-                        'video_description' => $media['extension_attributes']['video_content']['video_description'] ?? '',
-                        'video_metadata' => $media['extension_attributes']['video_content']['video_metadata'] ?? ''
-                    ];
-                }
-
-                $mediaEntries[] = $entry;
-            }
-        }
-
-        return $mediaEntries;
-    }
-
-    private function buildTierPrices(ProductDraft|VendorProduct $product, array $productData): array
-    {
-        $tierPrices = [];
-
-        if ($prices = data_get($productData, 'tier_prices')) {
-            foreach ($prices as $price) {
-                $tierPrices[] = [
-                    'customer_group_id' => $price['customer_group_id'] ?? 0,
-                    'qty' => $price['qty'] ?? 0,
-                    'value' => $price['value'] ?? 0,
-                    'extension_attributes' => [
-                        'percentage_value' => $price['extension_attributes']['percentage_value'] ?? 0,
-                        'website_id' => $price['extension_attributes']['website_id'] ?? 0
-                    ]
-                ];
-            }
-        }
-
-        return $tierPrices;
-    }
-    /**
-     * Resolve option ID for attribute
-     */
-    private function resolveOptionId(Vendor $vendor, string $attributeCode, string $label): int
-    {
-        $magentoService = $this->getMagentoServiceForVendor($vendor);
-
-        $options = Cache::remember(
-            "magento_attr_opts_{$vendor->id}_{$attributeCode}",
-            now()->addHours(24),
-            fn() => $magentoService->get("products/attributes/{$attributeCode}/options")
-        );
-
-        $match = collect($options)->first(
-            fn($opt) => strtolower(trim($opt['label'])) === strtolower(trim($label))
-        );
-
-        if (!$match) {
-            $available = collect($options)
-                ->filter(fn($o) => $o['value'] !== '')
-                ->pluck('label')
-                ->implode(', ');
-
-            throw new \RuntimeException(
-                "Magento attribute '{$attributeCode}': no option found for '{$label}'. " .
-                    "Available options: {$available}"
-            );
-        }
-
-        return (int) $match['value'];
-    }
-
-    /**
-     * Try to resolve option ID, fallback to raw value
-     */
-    private function tryResolveOptionId(Vendor $vendor, string $attributeCode, string $value): int|string
-    {
-        try {
-            $magentoService = $this->getMagentoServiceForVendor($vendor);
-
-            $options = Cache::remember(
-                "magento_attr_opts_{$vendor->id}_{$attributeCode}",
-                now()->addHours(24),
-                fn() => $magentoService->get("products/attributes/{$attributeCode}/options")
-            );
-
-            $filteredOptions = collect($options)->filter(fn($o) => $o['value'] !== '');
-
-            if ($filteredOptions->isEmpty()) {
-                return $value;
-            }
-
-            $match = $filteredOptions->first(
-                fn($opt) => strtolower(trim($opt['label'])) === strtolower(trim($value))
-            );
-
-            return $match ? (int) $match['value'] : $value;
-        } catch (\Throwable) {
-            return $value;
-        }
-    }
-
-    /**
-     * Merge metadata
-     */
     private function mergedMetadata(?VendorProduct $product, array $magentoProduct, array $extra = []): array
     {
         return array_merge($product?->metadata ?? [], $extra, [

@@ -46,10 +46,10 @@ class CmsPageService
 
         if (isset($filters['search'])) {
             $search = $filters['search'];
-            $query->where(function($q) use ($search) {
+            $query->where(function ($q) use ($search) {
                 $q->where('title', 'like', "%{$search}%")
-                  ->orWhere('content', 'like', "%{$search}%")
-                  ->orWhere('meta_title', 'like', "%{$search}%");
+                    ->orWhere('content', 'like', "%{$search}%")
+                    ->orWhere('meta_title', 'like', "%{$search}%");
             });
         }
 
@@ -108,40 +108,93 @@ class CmsPageService
     public function createPage(array $data): array
     {
         DB::beginTransaction();
-        
+
         try {
-            $magentoData = ['page' => [
+            // Start with required fields
+            $pageData = [
                 'identifier' => $data['identifier'],
                 'title' => $data['title'],
-                'content' => $data['content'] ?? '',
-                'active' => $data['is_active'] ?? true,
-            ]];
+                'active' => filter_var($data['is_active'] ?? true, FILTER_VALIDATE_BOOLEAN)
+            ];
 
-            // Optional fields
-            if (isset($data['page_layout'])) {
-                $magentoData['page']['page_layout'] = $data['page_layout'];
-            }
-            if (isset($data['content_heading'])) {
-                $magentoData['page']['content_heading'] = $data['content_heading'];
-            }
-            if (isset($data['meta_title'])) {
-                $magentoData['page']['meta_title'] = $data['meta_title'];
-            }
-            if (isset($data['meta_keywords'])) {
-                $magentoData['page']['meta_keywords'] = $data['meta_keywords'];
-            }
-            if (isset($data['meta_description'])) {
-                $magentoData['page']['meta_description'] = $data['meta_description'];
-            }
-            if (isset($data['sort_order'])) {
-                $magentoData['page']['sort_order'] = (string) $data['sort_order'];
+            // Add optional fields only if they have values
+            if (!empty($data['page_layout'])) {
+                $pageData['page_layout'] = $data['page_layout'];
             }
 
+            if (!empty($data['content_heading'])) {
+                $pageData['content_heading'] = $data['content_heading'];
+            }
+
+            if (!empty($data['content'])) {
+                $pageData['content'] = $data['content'];
+            }
+
+            if (!empty($data['meta_title'])) {
+                $pageData['meta_title'] = $data['meta_title'];
+            } elseif (!empty($data['title'])) {
+                $pageData['meta_title'] = $data['title'];
+            }
+
+            if (!empty($data['meta_keywords'])) {
+                $pageData['meta_keywords'] = $data['meta_keywords'];
+            }
+
+            if (!empty($data['meta_description'])) {
+                $pageData['meta_description'] = $data['meta_description'];
+            }
+
+            if (isset($data['sort_order']) && $data['sort_order'] !== '') {
+                $pageData['sort_order'] = (int)$data['sort_order'];
+            }
+
+            if (!empty($data['custom_theme'])) {
+                $pageData['custom_theme'] = $data['custom_theme'];
+            }
+
+            if (!empty($data['custom_root_template'])) {
+                $pageData['custom_root_template'] = $data['custom_root_template'];
+            }
+
+            // Handle XML fields - ONLY if they have valid content
+            if (!empty($data['layout_update_xml']) && trim($data['layout_update_xml']) !== '') {
+                $sanitizedXml = $this->sanitizeXml($data['layout_update_xml']);
+                if ($sanitizedXml !== '') {
+                    $pageData['layout_update_xml'] = $sanitizedXml;
+                }
+            }
+
+            // Handle custom_layout_update_xml - ONLY if has valid content
+            if (!empty($data['custom_layout_update_xml']) && trim($data['custom_layout_update_xml']) !== '') {
+                $sanitizedXml = $this->sanitizeXml($data['custom_layout_update_xml']);
+                if ($sanitizedXml !== '') {
+                    $pageData['custom_layout_update_xml'] = $sanitizedXml;
+                }
+            }
+
+            // Handle date fields
+            if (!empty($data['custom_theme_from']) && trim($data['custom_theme_from']) !== '') {
+                $pageData['custom_theme_from'] = $data['custom_theme_from'];
+            }
+
+            if (!empty($data['custom_theme_to']) && trim($data['custom_theme_to']) !== '') {
+                $pageData['custom_theme_to'] = $data['custom_theme_to'];
+            }
+
+            // Wrap in 'page' key as Magento expects
+            $magentoData = ['page' => $pageData];
+
+            // Log the request for debugging
+            Log::info('Creating CMS Page in Magento', ['request_data' => $magentoData]);
+
+            // Create in Magento
             $magentoPage = $this->createInMagento($magentoData);
+
+            // Sync to local DB
             $localPage = $this->syncFromMagento($magentoPage);
-            
+
             DB::commit();
-            
+
             return [
                 'success' => true,
                 'data' => [
@@ -153,7 +206,6 @@ class CmsPageService
                 ],
                 'message' => 'CMS Page created successfully'
             ];
-            
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('CMS Page creation failed', [
@@ -161,11 +213,14 @@ class CmsPageService
                 'data' => $data,
                 'error' => $e->getMessage()
             ]);
-            
+
             throw new \Exception('Failed to create CMS Page: ' . $e->getMessage());
         }
     }
 
+    /**
+     * Update CMS page (WRITE: Magento → Local)
+     */
     /**
      * Update CMS page (WRITE: Magento → Local)
      */
@@ -174,30 +229,87 @@ class CmsPageService
         $localPage = CmsPage::forVendor($this->vendor->id)
             ->where('uuid', $uuid)
             ->firstOrFail();
-        
+
         DB::beginTransaction();
-        
+
         try {
-            $magentoData = ['page' => []];
-            
-            $fields = ['identifier', 'title', 'content', 'page_layout', 'content_heading', 
-                       'meta_title', 'meta_keywords', 'meta_description', 'sort_order'];
-            
-            foreach ($fields as $field) {
-                if (isset($data[$field])) {
-                    $magentoData['page'][$field] = $field === 'sort_order' ? (string) $data[$field] : $data[$field];
+            $pageData = [];
+
+            // Only include fields that are provided and have values
+            $stringFields = [
+                'identifier',
+                'title',
+                'page_layout',
+                'meta_title',
+                'meta_keywords',
+                'meta_description',
+                'content_heading',
+                'content',
+                'custom_theme',
+                'custom_root_template'
+            ];
+
+            foreach ($stringFields as $field) {
+                if (isset($data[$field]) && !empty(trim($data[$field]))) {
+                    $pageData[$field] = $data[$field];
                 }
             }
-            
-            if (isset($data['is_active'])) {
-                $magentoData['page']['active'] = filter_var($data['is_active'], FILTER_VALIDATE_BOOLEAN);
+
+            // Handle sort_order
+            if (isset($data['sort_order']) && $data['sort_order'] !== '') {
+                $pageData['sort_order'] = (int)$data['sort_order'];
             }
-            
+
+            // Handle is_active
+            if (isset($data['is_active'])) {
+                $pageData['active'] = filter_var($data['is_active'], FILTER_VALIDATE_BOOLEAN);
+            }
+
+            // Handle XML fields - ONLY if they have valid content
+            if (isset($data['layout_update_xml']) && !empty(trim($data['layout_update_xml']))) {
+                $sanitizedXml = $this->sanitizeXml($data['layout_update_xml']);
+                if ($sanitizedXml !== '') {
+                    $pageData['layout_update_xml'] = $sanitizedXml;
+                }
+            }
+
+            if (isset($data['custom_layout_update_xml']) && !empty(trim($data['custom_layout_update_xml']))) {
+                $sanitizedXml = $this->sanitizeXml($data['custom_layout_update_xml']);
+                if ($sanitizedXml !== '') {
+                    $pageData['custom_layout_update_xml'] = $sanitizedXml;
+                }
+            }
+
+            // Handle date fields
+            if (isset($data['custom_theme_from']) && !empty(trim($data['custom_theme_from']))) {
+                $pageData['custom_theme_from'] = $data['custom_theme_from'];
+            }
+
+            if (isset($data['custom_theme_to']) && !empty(trim($data['custom_theme_to']))) {
+                $pageData['custom_theme_to'] = $data['custom_theme_to'];
+            }
+
+            // Only proceed if there's data to update
+            if (empty($pageData)) {
+                throw new \Exception('No valid data provided for update');
+            }
+
+            $magentoData = ['page' => $pageData];
+
+            // Log the request for debugging
+            Log::info('Updating CMS Page in Magento', [
+                'magento_id' => $localPage->magento_id,
+                'request_data' => $magentoData
+            ]);
+
+            // Update in Magento
             $updatedMagentoPage = $this->updateInMagento($localPage->magento_id, $magentoData);
+
+            // Sync to local DB
             $this->syncFromMagento($updatedMagentoPage);
-            
+
             DB::commit();
-            
+
             return [
                 'success' => true,
                 'data' => [
@@ -207,7 +319,6 @@ class CmsPageService
                 ],
                 'message' => 'CMS Page updated successfully'
             ];
-            
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('CMS Page update failed', [
@@ -215,7 +326,7 @@ class CmsPageService
                 'uuid' => $uuid,
                 'error' => $e->getMessage()
             ]);
-            
+
             throw new \Exception('Failed to update CMS Page: ' . $e->getMessage());
         }
     }
@@ -228,20 +339,19 @@ class CmsPageService
         $localPage = CmsPage::forVendor($this->vendor->id)
             ->where('uuid', $uuid)
             ->firstOrFail();
-        
+
         DB::beginTransaction();
-        
+
         try {
             $this->deleteFromMagento($localPage->magento_id);
             $localPage->delete();
-            
+
             DB::commit();
-            
+
             return [
                 'success' => true,
                 'message' => 'CMS Page deleted successfully'
             ];
-            
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('CMS Page deletion failed', [
@@ -249,7 +359,7 @@ class CmsPageService
                 'uuid' => $uuid,
                 'error' => $e->getMessage()
             ]);
-            
+
             throw new \Exception('Failed to delete CMS Page: ' . $e->getMessage());
         }
     }
@@ -260,15 +370,15 @@ class CmsPageService
     public function syncAllPages(): array
     {
         DB::beginTransaction();
-        
+
         try {
             $magentoPages = $this->magento()->get('cmsPage/search', [
                 'searchCriteria[pageSize]' => 100
             ]);
-            
+
             $syncedCount = 0;
             $errors = [];
-            
+
             foreach ($magentoPages['items'] ?? [] as $magentoPage) {
                 try {
                     $this->syncFromMagento($magentoPage);
@@ -280,9 +390,9 @@ class CmsPageService
                     ];
                 }
             }
-            
+
             DB::commit();
-            
+
             return [
                 'success' => true,
                 'message' => "Synced {$syncedCount} CMS pages successfully",
@@ -291,14 +401,13 @@ class CmsPageService
                     'errors' => $errors
                 ]
             ];
-            
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('CMS Page sync failed', [
                 'vendor_id' => $this->vendor->id,
                 'error' => $e->getMessage()
             ]);
-            
+
             throw new \Exception('Failed to sync CMS pages: ' . $e->getMessage());
         }
     }
@@ -347,5 +456,33 @@ class CmsPageService
                 'magento_updated_at' => $magentoPage['update_time'] ?? now()
             ]
         );
+    }
+
+
+
+    protected function sanitizeXml(?string $xml): string
+    {
+        if (empty($xml) || trim($xml) === '') {
+            return '';
+        }
+
+        // Remove any BOM or invalid characters
+        $xml = preg_replace('/[^\x{0009}\x{000A}\x{000D}\x{0020}-\x{D7FF}\x{E000}-\x{FFFD}]+/u', '', $xml);
+
+        // Try to validate XML structure
+        $prev = libxml_use_internal_errors(true);
+        $doc = simplexml_load_string($xml);
+        libxml_use_internal_errors($prev);
+
+        if ($doc === false) {
+            // Return empty string if XML is invalid
+            Log::warning('Invalid XML detected, skipping layout update', [
+                'xml' => $xml,
+                'vendor_id' => $this->vendor->id
+            ]);
+            return '';
+        }
+
+        return $xml;
     }
 }
