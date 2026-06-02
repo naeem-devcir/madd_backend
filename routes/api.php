@@ -582,6 +582,11 @@ Route::prefix('v1')->group(function () {
             Route::delete('/{uuid}', [App\Http\Controllers\Api\Admin\AdminCmsPageController::class, 'destroy']);
         });
 
+        // Cart endpoints for dynamic methods
+        Route::prefix('carts')->group(function () {
+            Route::get('/payment-methods', [App\Http\Controllers\Api\Admin\CartController::class, 'getPaymentMethods']);
+            Route::post('/shipping-methods', [App\Http\Controllers\Api\Admin\CartController::class, 'getShippingMethods']);
+        });
 
         // Order Management
         Route::prefix('orders')->group(function () {

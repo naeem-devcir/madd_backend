@@ -39,6 +39,10 @@ class AdminProductController extends Controller
     /**
      * GET /api/vendor/{vendor_uuid}/products
      * List all products (READ FROM LOCAL DB ONLY)
+     * 
+     * @param Request $request
+     * @param string $vendorUuid
+     * @return \Illuminate\Http\JsonResponse
      */
     public function index(Request $request, string $vendorUuid)
     {
@@ -51,7 +55,8 @@ class AdminProductController extends Controller
             $search = $request->search;
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'LIKE', "%{$search}%")
-                    ->orWhere('sku', 'LIKE', "%{$search}%");
+                    ->orWhere('sku', 'LIKE', "%{$search}%")
+                    ->orWhere('magento_sku', 'LIKE', "%{$search}%");
             });
         }
 
@@ -63,8 +68,17 @@ class AdminProductController extends Controller
             $query->where('sync_status', $request->sync_status);
         }
 
+        // ✅ Handle status filter properly
         if ($request->has('status')) {
-            $query->where('status', $request->status);
+            $statusValue = $request->status;
+
+            if ($statusValue === true || $statusValue === 'true' || $statusValue === '1' || $statusValue === 1) {
+                $query->where('status', 'active');
+            } elseif ($statusValue === false || $statusValue === 'false' || $statusValue === '0' || $statusValue === 0) {
+                $query->where('status', 'inactive');
+            } else {
+                $query->where('status', $statusValue);
+            }
         }
 
         if ($request->has('min_price')) {
@@ -76,18 +90,37 @@ class AdminProductController extends Controller
         }
 
         // Sorting
-        $sortBy = $request->get('sort_by', 'created_at');
-        $sortOrder = $request->get('sort_order', 'desc');
+        $sortBy = $request->input('sort_by', 'created_at');
+        $sortOrder = $request->input('sort_order', 'desc');
         $query->orderBy($sortBy, $sortOrder);
 
-        $perPage = $request->get('per_page', 15);
-        $products = $query->paginate($perPage);
+        $perPage = $request->input('per_page', 15);
 
-        // Add complete product data as attribute
-        $products->getCollection()->transform(function ($product) {
-            $product->product_data = $product->complete_product_data;
-            return $product;
-        });
+        // ✅ Check if limited fields are requested (for order creation)
+        $isLimited = $request->boolean('limited', false);
+
+        if ($isLimited) {
+            // Select only required fields for order creation
+            $products = $query->paginate($perPage, [
+                'uuid',
+                'name',
+                'sku',
+                'magento_sku',
+                'price',
+                'quantity',
+                'type_id',
+                'status'
+            ]);
+        } else {
+            // Full product data for other pages
+            $products = $query->paginate($perPage);
+
+            // Add complete product data as attribute (only for full view)
+            $products->getCollection()->transform(function ($product) {
+                $product->product_data = $product->complete_product_data;
+                return $product;
+            });
+        }
 
         return response()->json([
             'success' => true,

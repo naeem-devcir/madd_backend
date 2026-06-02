@@ -44,33 +44,33 @@ class OrderService
         array $filters = [],
         int $perPage = 15
     ): \Illuminate\Contracts\Pagination\LengthAwarePaginator {
-        
+
         $query = Order::with(['vendor', 'vendorStore', 'customer', 'items']);
-        
+
         // Filter by vendor UUID
         if ($vendorUuid) {
             $query->whereHas('vendor', function (Builder $q) use ($vendorUuid) {
                 $q->where('uuid', $vendorUuid);
             });
         }
-        
+
         // Filter by store UUID
         if ($storeUuid) {
             $query->whereHas('vendorStore', function (Builder $q) use ($storeUuid) {
                 $q->where('uuid', $storeUuid);
             });
         }
-        
+
         // Apply status filter
         if (!empty($filters['status'])) {
             $query->where('status', $filters['status']);
         }
-        
+
         // Apply payment status filter
         if (!empty($filters['payment_status'])) {
             $query->where('payment_status', $filters['payment_status']);
         }
-        
+
         // Apply search filter
         if (!empty($filters['search'])) {
             $searchTerm = '%' . addcslashes($filters['search'], '%_') . '%';
@@ -81,27 +81,27 @@ class OrderService
                     ->orWhere('customer_lastname', 'like', $searchTerm);
             });
         }
-        
+
         // Apply date range filter
         if (!empty($filters['date_from'])) {
             $query->whereDate('created_at', '>=', $filters['date_from']);
         }
-        
+
         if (!empty($filters['date_to'])) {
             $query->whereDate('created_at', '<=', $filters['date_to']);
         }
-        
+
         // Apply amount range filter
         if (!empty($filters['amount_min'])) {
             $query->where('grand_total', '>=', $filters['amount_min']);
         }
-        
+
         if (!empty($filters['amount_max'])) {
             $query->where('grand_total', '<=', $filters['amount_max']);
         }
-        
+
         $perPage = min($perPage, 100);
-        
+
         return $query->orderBy('created_at', 'desc')
             ->paginate($perPage);
     }
@@ -115,8 +115,8 @@ class OrderService
      * @return Order|null
      */
     public function getOrderFromDatabase(
-        string $orderId, 
-        ?string $vendorUuid = null, 
+        string $orderId,
+        ?string $vendorUuid = null,
         ?string $storeUuid = null
     ): ?Order {
         $query = Order::with([
@@ -127,25 +127,25 @@ class OrderService
             'items.vendorProduct',
             'statusHistory',
         ]);
-        
+
         // Apply authorization filters
         if ($vendorUuid) {
             $query->whereHas('vendor', function (Builder $q) use ($vendorUuid) {
                 $q->where('uuid', $vendorUuid);
             });
         }
-        
+
         if ($storeUuid) {
             $query->whereHas('vendorStore', function (Builder $q) use ($storeUuid) {
                 $q->where('uuid', $storeUuid);
             });
         }
-        
+
         return $query->where(function ($q) use ($orderId) {
-                $q->where('uuid', $orderId)
-                  ->orWhere('id', $orderId)
-                  ->orWhere('magento_order_increment_id', $orderId);
-            })
+            $q->where('uuid', $orderId)
+                ->orWhere('id', $orderId)
+                ->orWhere('magento_order_increment_id', $orderId);
+        })
             ->first();
     }
 
@@ -163,19 +163,19 @@ class OrderService
         string $period = '30_days'
     ): array {
         $query = Order::query();
-        
+
         if ($vendorUuid) {
             $query->whereHas('vendor', function (Builder $q) use ($vendorUuid) {
                 $q->where('uuid', $vendorUuid);
             });
         }
-        
+
         if ($storeUuid) {
             $query->whereHas('vendorStore', function (Builder $q) use ($storeUuid) {
                 $q->where('uuid', $storeUuid);
             });
         }
-        
+
         $startDate = match ($period) {
             '7_days' => now()->subDays(7),
             '30_days' => now()->subDays(30),
@@ -183,12 +183,12 @@ class OrderService
             'year' => now()->subYear(),
             default => now()->subDays(30),
         };
-        
+
         $periodQuery = clone $query;
         $periodOrders = $periodQuery->where('created_at', '>=', $startDate);
-        
+
         $totalQuery = clone $query;
-        
+
         return [
             'total_orders' => $totalQuery->count(),
             'total_revenue' => $totalQuery->where('status', '!=', 'cancelled')->sum('grand_total'),
@@ -223,33 +223,33 @@ class OrderService
             'vendor_uuid' => $vendor->uuid,
             'options' => $options
         ]);
-        
+
         $magentoService = MagentoService::forVendor($vendor);
-        
+
         $pageSize = $options['page_size'] ?? 50;
         $currentPage = $options['current_page'] ?? 1;
         $maxPages = $options['max_pages'] ?? 5;
-        
+
         $syncedCount = 0;
         $updatedCount = 0;
         $skippedCount = 0;
         $errors = [];
-        
+
         try {
             $searchCriteria = $this->buildOrderSearchCriteria($options);
-            
+
             for ($page = $currentPage; $page <= $maxPages; $page++) {
                 $searchCriteria['searchCriteria[currentPage]'] = $page;
                 $searchCriteria['searchCriteria[pageSize]'] = $pageSize;
-                
+
                 Log::info('Fetching orders from Magento API', [
                     'vendor_id' => $vendor->id,
                     'page' => $page,
                     'page_size' => $pageSize
                 ]);
-                
+
                 $response = $magentoService->get('orders', $searchCriteria);
-                
+
                 if (empty($response['items'])) {
                     Log::info('No more orders found from Magento', [
                         'vendor_id' => $vendor->id,
@@ -257,11 +257,11 @@ class OrderService
                     ]);
                     break;
                 }
-                
+
                 foreach ($response['items'] as $magentoOrder) {
                     try {
                         $result = $this->syncSingleOrder($magentoOrder, $vendor, $options);
-                        
+
                         if ($result['action'] === 'created') {
                             $syncedCount++;
                         } elseif ($result['action'] === 'updated') {
@@ -282,19 +282,19 @@ class OrderService
                         ]);
                     }
                 }
-                
+
                 $totalCount = $response['total_count'] ?? 0;
                 if (($page * $pageSize) >= $totalCount) {
                     break;
                 }
             }
-            
+
             // Update vendor's last sync timestamp
             $vendor->update([
                 'magento_orders_synced_at' => now(),
                 'magento_synced_at' => now(),
             ]);
-            
+
             Log::info('Order sync completed', [
                 'vendor_id' => $vendor->id,
                 'synced' => $syncedCount,
@@ -302,7 +302,7 @@ class OrderService
                 'skipped' => $skippedCount,
                 'errors' => count($errors)
             ]);
-            
+
             return [
                 'success' => true,
                 'synced_count' => $syncedCount,
@@ -312,13 +312,12 @@ class OrderService
                 'vendor_id' => $vendor->uuid,
                 'synced_at' => now()->toIso8601String(),
             ];
-            
         } catch (\Exception $e) {
             Log::error('Order sync failed', [
                 'vendor_id' => $vendor->id,
                 'error' => $e->getMessage()
             ]);
-            
+
             return [
                 'success' => false,
                 'error' => $e->getMessage(),
@@ -348,11 +347,11 @@ class OrderService
         $existingOrder = Order::where('magento_order_id', $magentoOrder['entity_id'])
             ->orWhere('magento_order_increment_id', $magentoOrder['increment_id'])
             ->first();
-        
+
         if ($existingOrder) {
             return $this->updateExistingOrder($existingOrder, $magentoOrder);
         }
-        
+
         return $this->createNewOrder($magentoOrder, $vendor, $options);
     }
 
@@ -379,7 +378,7 @@ class OrderService
             }
 
             $vendorStore = $vendorStoreQuery->first();
-            
+
             if (!$vendorStore) {
                 throw new \Exception('Vendor store not found for Magento store ID: ' . $magentoOrder['store_id']);
             }
@@ -461,7 +460,6 @@ class OrderService
             ]);
 
             return ['action' => 'created', 'order' => $order];
-
         } catch (\Exception $e) {
             DB::rollBack();
             throw $e;
@@ -479,7 +477,7 @@ class OrderService
     {
         $oldStatus = $order->status;
         $newStatus = $magentoOrder['status'];
-        
+
         $order->update([
             'status' => $newStatus,
             'payment_status' => $this->determinePaymentStatus($magentoOrder),
@@ -533,7 +531,7 @@ class OrderService
         DB::beginTransaction();
 
         try {
-            // Create cart for customer
+            // Step 1: Create cart for customer
             $cartIdResponse = $magentoService->post("customers/{$customerId}/carts");
             $cartId = $cartIdResponse['value'] ?? $cartIdResponse['id'] ?? $cartIdResponse['cart_id'] ?? null;
 
@@ -545,7 +543,7 @@ class OrderService
                 throw new \Exception('Magento did not return a cart ID for the selected customer');
             }
 
-            // Add items to cart
+            // Step 2: Add items to cart
             foreach ($orderData['items'] as $item) {
                 $magentoService->post("carts/{$cartId}/items", [
                     'cartItem' => [
@@ -556,16 +554,24 @@ class OrderService
                 ]);
             }
 
-            // Apply coupon if provided
+            // Step 3: Apply coupon if provided
             if (!empty($orderData['coupon_code'])) {
-                $magentoService->put("carts/{$cartId}/coupons/" . rawurlencode($orderData['coupon_code']), []);
+                try {
+                    $magentoService->put("carts/{$cartId}/coupons/" . rawurlencode($orderData['coupon_code']), []);
+                } catch (\Exception $e) {
+                    \Log::warning('Failed to apply coupon', [
+                        'cart_id' => $cartId,
+                        'coupon' => $orderData['coupon_code'],
+                        'error' => $e->getMessage()
+                    ]);
+                }
             }
 
-            // Format addresses
+            // Step 4: Format addresses
             $shippingAddress = $this->formatMagentoAddress($orderData['shipping_address'], $orderData['customer']['email']);
             $billingAddress = $this->formatMagentoAddress($orderData['billing_address'], $orderData['customer']['email']);
 
-            // Set shipping information
+            // Step 5: Set shipping information
             $shippingInfo = $magentoService->post("carts/{$cartId}/shipping-information", [
                 'addressInformation' => [
                     'shipping_address' => $shippingAddress,
@@ -575,13 +581,14 @@ class OrderService
                 ],
             ]);
 
-            // Place order
-            $createdOrderResponse = $magentoService->post("carts/{$cartId}/payment-information", [
-                'paymentMethod' => [
-                    'method' => $orderData['payment_method'],
-                ],
-                'billing_address' => $billingAddress,
+            // ✅ Step 6: Set payment method using the correct endpoint
+            // Use PUT request to set selected payment method
+            $paymentResponse = $magentoService->put("carts/{$cartId}/selected-payment-method", [
+                'method' => $orderData['payment_method'],
             ]);
+
+            // Step 7: Place the order (convert cart to order)
+            $createdOrderResponse = $magentoService->put("carts/{$cartId}/order", []);
 
             $magentoOrderId = $createdOrderResponse['value'] ?? $createdOrderResponse['order_id'] ?? $createdOrderResponse['entity_id'] ?? null;
             $magentoOrder = null;
@@ -615,15 +622,16 @@ class OrderService
             DB::commit();
 
             return [
+                'success' => true,
                 'cart_id' => $cartId,
                 'magento_order_id' => $magentoOrder['entity_id'],
                 'magento_order_increment_id' => $magentoOrder['increment_id'] ?? null,
                 'shipping_information' => $shippingInfo,
-                'payment_information' => $createdOrderResponse,
+                'payment_response' => $paymentResponse,
+                'order_place_response' => $createdOrderResponse,
                 'sync' => $syncResult,
                 'order' => $localOrder,
             ];
-
         } catch (\Exception $e) {
             DB::rollBack();
             throw $e;
@@ -644,7 +652,7 @@ class OrderService
     {
         $criteria = [];
         $filterIndex = 0;
-        
+
         // Filter by status
         if (!empty($options['status'])) {
             $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][field]"] = 'status';
@@ -660,7 +668,7 @@ class OrderService
             $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][condition_type]"] = 'eq';
             $filterIndex++;
         }
-        
+
         // Filter by date range
         if (!empty($options['from_date'])) {
             $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][field]"] = 'created_at';
@@ -668,18 +676,18 @@ class OrderService
             $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][condition_type]"] = 'gteq';
             $filterIndex++;
         }
-        
+
         if (!empty($options['to_date'])) {
             $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][field]"] = 'created_at';
             $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][value]"] = $options['to_date'];
             $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][condition_type]"] = 'lteq';
             $filterIndex++;
         }
-        
+
         // Sort by created_at descending
         $criteria["searchCriteria[sortOrders][0][field]"] = 'created_at';
         $criteria["searchCriteria[sortOrders][0][direction]"] = 'DESC';
-        
+
         return $criteria;
     }
 
@@ -692,15 +700,15 @@ class OrderService
     protected function determinePaymentStatus(array $magentoOrder): string
     {
         $orderStatus = strtolower($magentoOrder['status'] ?? '');
-        
+
         if (in_array($orderStatus, ['canceled', 'cancelled'])) {
             return 'refunded';
         }
-        
+
         if ($orderStatus === 'closed') {
             return 'paid';
         }
-        
+
         // Check payment information
         if (isset($magentoOrder['payment']['additional_information'])) {
             $paymentInfo = $magentoOrder['payment']['additional_information'];
@@ -708,15 +716,15 @@ class OrderService
                 return 'paid';
             }
         }
-        
+
         if (in_array($orderStatus, ['pending', 'pending_payment'])) {
             return 'pending';
         }
-        
+
         if (in_array($orderStatus, ['processing', 'complete', 'closed'])) {
             return 'paid';
         }
-        
+
         return 'pending';
     }
 
