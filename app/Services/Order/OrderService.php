@@ -5,51 +5,42 @@ namespace App\Services\Order;
 use App\Models\Order\Order;
 use App\Models\Order\OrderItem;
 use App\Models\Order\OrderStatusHistory;
-use App\Models\Order\OrderTracking;
 use App\Models\Vendor\Vendor;
 use App\Models\Vendor\VendorStore;
 use App\Models\Product\VendorProduct;
 use App\Models\User;
 use App\Services\Integration\MagentoService;
 use App\Services\Vendor\CommissionService;
-use App\Services\Inventory\InventoryService;
 use App\Events\Order\OrderCreated;
-// use App\Events\Order\OrderStatusChanged;
-use App\Events\Events\Order\OrderStatusChanged;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Facades\Auth;
 
 class OrderService
 {
     protected CommissionService $commissionService;
-    protected InventoryService $inventoryService;
 
-    public function __construct(
-        CommissionService $commissionService, 
-        InventoryService $inventoryService
-    ) {
+    public function __construct(CommissionService $commissionService)
+    {
         $this->commissionService = $commissionService;
-        $this->inventoryService = $inventoryService;
     }
 
     // ─────────────────────────────────────────────────────
-    // DATABASE QUERY METHODS (USED BY CONTROLLERS)
+    // DATABASE QUERY METHODS (READ OPERATIONS)
     // ─────────────────────────────────────────────────────
 
     /**
      * Get orders from local database with filters
      * 
-     * @param string|null $vendorId - Vendor UUID
-     * @param string|null $storeId - Vendor Store UUID
+     * @param string|null $vendorUuid - Vendor UUID
+     * @param string|null $storeUuid - Vendor Store UUID
      * @param array $filters - Additional filters (status, date range, etc.)
      * @param int $perPage
      * @return \Illuminate\Contracts\Pagination\LengthAwarePaginator
      */
     public function getOrdersFromDatabase(
-        ?string $vendorId = null,
-        ?string $storeId = null,
+        ?string $vendorUuid = null,
+        ?string $storeUuid = null,
         array $filters = [],
         int $perPage = 15
     ): \Illuminate\Contracts\Pagination\LengthAwarePaginator {
@@ -57,16 +48,16 @@ class OrderService
         $query = Order::with(['vendor', 'vendorStore', 'customer', 'items']);
         
         // Filter by vendor UUID
-        if ($vendorId) {
-            $query->whereHas('vendor', function (Builder $q) use ($vendorId) {
-                $q->where('uuid', $vendorId);
+        if ($vendorUuid) {
+            $query->whereHas('vendor', function (Builder $q) use ($vendorUuid) {
+                $q->where('uuid', $vendorUuid);
             });
         }
         
         // Filter by store UUID
-        if ($storeId) {
-            $query->whereHas('vendorStore', function (Builder $q) use ($storeId) {
-                $q->where('uuid', $storeId);
+        if ($storeUuid) {
+            $query->whereHas('vendorStore', function (Builder $q) use ($storeUuid) {
+                $q->where('uuid', $storeUuid);
             });
         }
         
@@ -118,15 +109,15 @@ class OrderService
     /**
      * Get single order from local database by ID
      * 
-     * @param string $orderId - Order UUID
-     * @param string|null $vendorId - Optional vendor UUID for authorization
-     * @param string|null $storeId - Optional store UUID for authorization
+     * @param string $orderId - Order UUID or ID or increment ID
+     * @param string|null $vendorUuid - Vendor UUID for authorization
+     * @param string|null $storeUuid - Store UUID for authorization
      * @return Order|null
      */
     public function getOrderFromDatabase(
         string $orderId, 
-        ?string $vendorId = null, 
-        ?string $storeId = null
+        ?string $vendorUuid = null, 
+        ?string $storeUuid = null
     ): ?Order {
         $query = Order::with([
             'vendor',
@@ -135,53 +126,53 @@ class OrderService
             'items',
             'items.vendorProduct',
             'statusHistory',
-            'tracking',
-            'tracking.carrier',
-            'paymentTransactions',
-            'refunds',
-            'settlement',
         ]);
         
         // Apply authorization filters
-        if ($vendorId) {
-            $query->whereHas('vendor', function (Builder $q) use ($vendorId) {
-                $q->where('uuid', $vendorId);
+        if ($vendorUuid) {
+            $query->whereHas('vendor', function (Builder $q) use ($vendorUuid) {
+                $q->where('uuid', $vendorUuid);
             });
         }
         
-        if ($storeId) {
-            $query->whereHas('vendorStore', function (Builder $q) use ($storeId) {
-                $q->where('uuid', $storeId);
+        if ($storeUuid) {
+            $query->whereHas('vendorStore', function (Builder $q) use ($storeUuid) {
+                $q->where('uuid', $storeUuid);
             });
         }
         
-        return $query->where('uuid', $orderId)->first();
+        return $query->where(function ($q) use ($orderId) {
+                $q->where('uuid', $orderId)
+                  ->orWhere('id', $orderId)
+                  ->orWhere('magento_order_increment_id', $orderId);
+            })
+            ->first();
     }
 
     /**
      * Get order statistics from local database
      * 
-     * @param string|null $vendorId
-     * @param string|null $storeId
+     * @param string|null $vendorUuid
+     * @param string|null $storeUuid
      * @param string $period
      * @return array
      */
     public function getOrderStatisticsFromDatabase(
-        ?string $vendorId = null,
-        ?string $storeId = null,
+        ?string $vendorUuid = null,
+        ?string $storeUuid = null,
         string $period = '30_days'
     ): array {
         $query = Order::query();
         
-        if ($vendorId) {
-            $query->whereHas('vendor', function (Builder $q) use ($vendorId) {
-                $q->where('uuid', $vendorId);
+        if ($vendorUuid) {
+            $query->whereHas('vendor', function (Builder $q) use ($vendorUuid) {
+                $q->where('uuid', $vendorUuid);
             });
         }
         
-        if ($storeId) {
-            $query->whereHas('vendorStore', function (Builder $q) use ($storeId) {
-                $q->where('uuid', $storeId);
+        if ($storeUuid) {
+            $query->whereHas('vendorStore', function (Builder $q) use ($storeUuid) {
+                $q->where('uuid', $storeUuid);
             });
         }
         
@@ -214,69 +205,12 @@ class OrderService
         ];
     }
 
-    /**
-     * Get order timeline from local database
-     * 
-     * @param Order $order
-     * @return array
-     */
-    public function getOrderTimeline(Order $order): array
-    {
-        $timeline = [];
-
-        $timeline[] = [
-            'event' => 'Order Created',
-            'status' => 'pending',
-            'description' => 'Order has been placed',
-            'timestamp' => $order->created_at->toIso8601String(),
-        ];
-
-        if ($order->payment_status === 'paid') {
-            $timeline[] = [
-                'event' => 'Payment Received',
-                'status' => 'paid',
-                'description' => 'Payment has been confirmed',
-                'timestamp' => $order->payment_confirmed_at?->toIso8601String() ?? $order->updated_at->toIso8601String(),
-            ];
-        }
-
-        if ($order->status === 'processing') {
-            $timeline[] = [
-                'event' => 'Order Processing',
-                'status' => 'processing',
-                'description' => 'Order is being prepared',
-                'timestamp' => $order->processed_at?->toIso8601String() ?? $order->updated_at->toIso8601String(),
-            ];
-        }
-
-        if ($order->shipped_at) {
-            $timeline[] = [
-                'event' => 'Order Shipped',
-                'status' => 'shipped',
-                'description' => 'Order has been shipped' . ($order->tracking_number ? ' - Tracking: ' . $order->tracking_number : ''),
-                'timestamp' => $order->shipped_at->toIso8601String(),
-            ];
-        }
-
-        if ($order->delivered_at) {
-            $timeline[] = [
-                'event' => 'Order Delivered',
-                'status' => 'delivered',
-                'description' => 'Order has been delivered',
-                'timestamp' => $order->delivered_at->toIso8601String(),
-            ];
-        }
-
-        return $timeline;
-    }
-
     // ─────────────────────────────────────────────────────
     // SYNC METHODS (FETCH FROM MAGENTO, UPDATE LOCAL DB)
     // ─────────────────────────────────────────────────────
 
     /**
      * Sync orders from Magento to local database
-     * This method is called from frontend to trigger sync
      * 
      * @param Vendor $vendor
      * @param array $options - Sync options (page_size, status_filter, etc.)
@@ -294,7 +228,7 @@ class OrderService
         
         $pageSize = $options['page_size'] ?? 50;
         $currentPage = $options['current_page'] ?? 1;
-        $maxPages = $options['max_pages'] ?? 5; // Limit to avoid overloading
+        $maxPages = $options['max_pages'] ?? 5;
         
         $syncedCount = 0;
         $updatedCount = 0;
@@ -302,7 +236,6 @@ class OrderService
         $errors = [];
         
         try {
-            // Build search criteria for orders
             $searchCriteria = $this->buildOrderSearchCriteria($options);
             
             for ($page = $currentPage; $page <= $maxPages; $page++) {
@@ -316,8 +249,6 @@ class OrderService
                 ]);
                 
                 $response = $magentoService->get('orders', $searchCriteria);
-                
-                Log::info($response);
                 
                 if (empty($response['items'])) {
                     Log::info('No more orders found from Magento', [
@@ -352,7 +283,6 @@ class OrderService
                     }
                 }
                 
-                // Check if we've fetched all pages
                 $totalCount = $response['total_count'] ?? 0;
                 if (($page * $pageSize) >= $totalCount) {
                     break;
@@ -404,10 +334,12 @@ class OrderService
      * 
      * @param array $magentoOrder
      * @param Vendor $vendor
+     * @param array $options
      * @return array
      */
     protected function syncSingleOrder(array $magentoOrder, Vendor $vendor, array $options = []): array
     {
+        // Filter by store if specified
         if (!empty($options['magento_store_id']) && (int) ($magentoOrder['store_id'] ?? 0) !== (int) $options['magento_store_id']) {
             return ['action' => 'skipped', 'reason' => 'store_mismatch'];
         }
@@ -418,10 +350,6 @@ class OrderService
             ->first();
         
         if ($existingOrder) {
-            if ($options['only_create_missing'] ?? false) {
-                return ['action' => 'skipped', 'reason' => 'already_exists', 'order' => $existingOrder];
-            }
-
             return $this->updateExistingOrder($existingOrder, $magentoOrder);
         }
         
@@ -433,6 +361,7 @@ class OrderService
      * 
      * @param array $magentoOrder
      * @param Vendor $vendor
+     * @param array $options
      * @return array
      * @throws \Exception
      */
@@ -455,7 +384,7 @@ class OrderService
                 throw new \Exception('Vendor store not found for Magento store ID: ' . $magentoOrder['store_id']);
             }
 
-            // Find or create customer
+            // Find customer if exists
             $customer = null;
             if (isset($magentoOrder['customer_id']) && $magentoOrder['customer_id']) {
                 $customer = User::where('magento_customer_id', $magentoOrder['customer_id'])->first();
@@ -566,7 +495,7 @@ class OrderService
         ]);
 
         if ($oldStatus !== $newStatus) {
-            event(new OrderStatusChanged($order, $oldStatus, $newStatus));
+            event(new \App\Events\Events\Order\OrderStatusChanged($order, $oldStatus, $newStatus));
         }
 
         Log::info('Order updated from Magento sync', [
@@ -578,252 +507,20 @@ class OrderService
         return ['action' => 'updated', 'order' => $order];
     }
 
+    // ─────────────────────────────────────────────────────
+    // MANUAL ORDER CREATION METHODS
+    // ─────────────────────────────────────────────────────
+
     /**
-     * Build search criteria for Magento orders API
+     * Create manual order in Magento and sync to local database
      * 
-     * @param array $options
+     * @param Vendor $vendor
+     * @param VendorStore $store
+     * @param array $orderData
+     * @param int|null $userId
      * @return array
-     */
-    protected function buildOrderSearchCriteria(array $options = []): array
-    {
-        $criteria = [];
-        $filterIndex = 0;
-        
-        // Filter by status
-        if (!empty($options['status'])) {
-            $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][field]"] = 'status';
-            $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][value]"] = $options['status'];
-            $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][condition_type]"] = 'eq';
-            $filterIndex++;
-        }
-
-        // Filter by Magento store selected in admin.
-        if (!empty($options['magento_store_id'])) {
-            $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][field]"] = 'store_id';
-            $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][value]"] = $options['magento_store_id'];
-            $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][condition_type]"] = 'eq';
-            $filterIndex++;
-        }
-        
-        // Filter by date range (created_at)
-        if (!empty($options['from_date'])) {
-            $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][field]"] = 'created_at';
-            $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][value]"] = $options['from_date'];
-            $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][condition_type]"] = 'gteq';
-            $filterIndex++;
-        }
-        
-        if (!empty($options['to_date'])) {
-            $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][field]"] = 'created_at';
-            $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][value]"] = $options['to_date'];
-            $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][condition_type]"] = 'lteq';
-            $filterIndex++;
-        }
-        
-        // Filter by increment ID (order number)
-        if (!empty($options['increment_id'])) {
-            $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][field]"] = 'increment_id';
-            $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][value]"] = $options['increment_id'];
-            $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][condition_type]"] = 'eq';
-            $filterIndex++;
-        }
-        
-        // Sorting
-        $criteria["searchCriteria[sortOrders][0][field]"] = $options['sort_field'] ?? 'created_at';
-        $criteria["searchCriteria[sortOrders][0][direction]"] = $options['sort_direction'] ?? 'DESC';
-        
-        return $criteria;
-    }
-
-    /**
-     * Determine payment status from Magento order data
-     * 
-     * @param array $magentoOrder
-     * @return string
-     */
-    protected function determinePaymentStatus(array $magentoOrder): string
-    {
-        // Check payment status from Magento order
-        if (isset($magentoOrder['status'])) {
-            $status = strtolower($magentoOrder['status']);
-            
-            if (in_array($status, ['canceled', 'cancelled'])) {
-                return 'refunded';
-            }
-            
-            if ($status === 'closed') {
-                return 'paid';
-            }
-        }
-        
-        // Check payment additional information
-        if (isset($magentoOrder['payment']['additional_information'])) {
-            $paymentInfo = $magentoOrder['payment']['additional_information'];
-            if (is_array($paymentInfo) && in_array('captured', $paymentInfo)) {
-                return 'paid';
-            }
-        }
-        
-        // Default based on order status
-        $orderStatus = $magentoOrder['status'] ?? '';
-        if (in_array($orderStatus, ['pending', 'pending_payment'])) {
-            return 'pending';
-        }
-        
-        if (in_array($orderStatus, ['processing', 'complete', 'closed'])) {
-            return 'paid';
-        }
-        
-        return 'pending';
-    }
-
-    // ─────────────────────────────────────────────────────
-    // ORDER MANAGEMENT METHODS (UPDATE, CANCEL, REFUND)
-    // ─────────────────────────────────────────────────────
-
-    /**
-     * Update order status
-     * 
-     * @param Order $order
-     * @param string $status
-     * @param string|null $notes
-     * @param User|null $user
-     * @return Order
-     */
-    public function updateOrderStatus(Order $order, string $status, ?string $notes = null, ?User $user = null): Order
-    {
-        $oldStatus = $order->status;
-        
-        $order->status = $status;
-        
-        if ($status === 'shipped' && !$order->shipped_at) {
-            $order->shipped_at = now();
-        }
-        
-        if ($status === 'delivered' && !$order->delivered_at) {
-            $order->delivered_at = now();
-        }
-        
-        if ($status === 'processing' && !$order->processed_at) {
-            $order->processed_at = now();
-        }
-        
-        $order->save();
-        
-        // Add to status history if you have the model
-        // OrderStatusHistory::create([
-        //     'order_id' => $order->id,
-        //     'old_status' => $oldStatus,
-        //     'new_status' => $status,
-        //     'notes' => $notes,
-        //     'user_id' => $user?->id,
-        // ]);
-        
-        event(new OrderStatusChanged($order, $oldStatus, $status));
-        
-        return $order;
-    }
-
-    /**
-     * Cancel order
-     * 
-     * @param Order $order
-     * @param string $reason
-     * @param User|null $user
-     * @return Order
      * @throws \Exception
      */
-    public function cancelOrder(Order $order, string $reason, ?User $user = null): Order
-    {
-        if (!$order->canBeCancelled()) {
-            throw new \Exception('Order cannot be cancelled at this stage');
-        }
-
-        DB::beginTransaction();
-
-        try {
-            // Restore inventory
-            foreach ($order->items as $item) {
-                if ($item->vendor_product_id) {
-                    $this->inventoryService->restoreStock($item->vendor_product_id, $item->qty_ordered);
-                }
-            }
-
-            // Update order status
-            $order->status = 'cancelled';
-            $order->save();
-
-            // Add cancellation note
-            $adminNotes = $order->admin_note ? json_decode($order->admin_note, true) : [];
-            $adminNotes[] = [
-                'type' => 'cancellation',
-                'reason' => $reason,
-                'cancelled_by' => $user?->id,
-                'cancelled_at' => now()->toIso8601String(),
-            ];
-            $order->admin_note = json_encode($adminNotes);
-            $order->save();
-
-            // Process refund if payment was captured
-            if ($order->payment_status === 'paid') {
-                $this->processRefund($order);
-            }
-
-            DB::commit();
-
-            return $order;
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-            throw $e;
-        }
-    }
-
-    /**
-     * Process refund for order
-     * 
-     * @param Order $order
-     * @param float|null $amount
-     * @param string|null $reason
-     * @return array
-     */
-    public function processRefund(Order $order, ?float $amount = null, ?string $reason = null): array
-    {
-        $refundAmount = $amount ?? $order->grand_total;
-        
-        if ($refundAmount > $order->grand_total) {
-            throw new \Exception('Refund amount cannot exceed order total');
-        }
-        
-        // Create refund record (assuming Refund model exists)
-        // $refund = Refund::create([
-        //     'order_id' => $order->id,
-        //     'vendor_id' => $order->vendor_id,
-        //     'amount' => $refundAmount,
-        //     'reason' => $reason,
-        //     'status' => 'pending',
-        //     'requested_by' => auth()->id(),
-        //     'requested_at' => now(),
-        // ]);
-        
-        // Update order payment status
-        if ($refundAmount >= $order->grand_total) {
-            $order->payment_status = 'refunded';
-        } else {
-            $order->payment_status = 'partial_refunded';
-        }
-        $order->save();
-        
-        return [
-            'success' => true,
-            'refund_amount' => $refundAmount,
-            'status' => 'pending'
-        ];
-    }
-
-    // Magento-first write methods live below. Controllers validate/scope requests,
-    // Magento confirms the write, then these methods refresh local order state.
-
     public function createManualOrderInMagento(Vendor $vendor, VendorStore $store, array $orderData, ?int $userId = null): array
     {
         $magentoService = MagentoService::forVendor($vendor);
@@ -836,6 +533,7 @@ class OrderService
         DB::beginTransaction();
 
         try {
+            // Create cart for customer
             $cartIdResponse = $magentoService->post("customers/{$customerId}/carts");
             $cartId = $cartIdResponse['value'] ?? $cartIdResponse['id'] ?? $cartIdResponse['cart_id'] ?? null;
 
@@ -847,6 +545,7 @@ class OrderService
                 throw new \Exception('Magento did not return a cart ID for the selected customer');
             }
 
+            // Add items to cart
             foreach ($orderData['items'] as $item) {
                 $magentoService->post("carts/{$cartId}/items", [
                     'cartItem' => [
@@ -857,13 +556,16 @@ class OrderService
                 ]);
             }
 
+            // Apply coupon if provided
             if (!empty($orderData['coupon_code'])) {
                 $magentoService->put("carts/{$cartId}/coupons/" . rawurlencode($orderData['coupon_code']), []);
             }
 
+            // Format addresses
             $shippingAddress = $this->formatMagentoAddress($orderData['shipping_address'], $orderData['customer']['email']);
             $billingAddress = $this->formatMagentoAddress($orderData['billing_address'], $orderData['customer']['email']);
 
+            // Set shipping information
             $shippingInfo = $magentoService->post("carts/{$cartId}/shipping-information", [
                 'addressInformation' => [
                     'shipping_address' => $shippingAddress,
@@ -873,6 +575,7 @@ class OrderService
                 ],
             ]);
 
+            // Place order
             $createdOrderResponse = $magentoService->post("carts/{$cartId}/payment-information", [
                 'paymentMethod' => [
                     'method' => $orderData['payment_method'],
@@ -893,14 +596,15 @@ class OrderService
                 throw new \Exception('Magento order was created but could not be fetched for synchronization');
             }
 
+            // Sync the created order to local database
             $syncResult = $this->syncSingleOrder($magentoOrder, $vendor, [
                 'store_uuid' => $store->uuid,
                 'magento_store_id' => $store->magento_store_id,
-                'only_create_missing' => false,
             ]);
 
             $localOrder = $syncResult['order'] ?? Order::where('magento_order_id', $magentoOrder['entity_id'])->first();
 
+            // Add history comment if provided
             if ($localOrder && !empty($orderData['history']['append_comment']) && !empty($orderData['history']['comment'])) {
                 $this->recordOrderHistory($localOrder, $localOrder->status, $orderData['history']['comment'], $userId, [
                     'email_confirmation' => (bool) ($orderData['history']['email_confirmation'] ?? false),
@@ -926,237 +630,103 @@ class OrderService
         }
     }
 
-    public function updateOrderStatusInMagento(Vendor $vendor, Order $order, VendorStore $store, array $data, ?int $userId = null): array
+    // ─────────────────────────────────────────────────────
+    // HELPER METHODS
+    // ─────────────────────────────────────────────────────
+
+    /**
+     * Build search criteria for Magento orders API
+     * 
+     * @param array $options
+     * @return array
+     */
+    protected function buildOrderSearchCriteria(array $options = []): array
     {
-        $comment = $data['comment'] ?? $data['notes'] ?? 'Status updated from admin';
-        $response = MagentoService::forVendor($vendor)->post("orders/{$order->magento_order_id}/comments", [
-            'statusHistory' => [
-                'comment' => $comment,
-                'status' => $data['status'],
-                'is_customer_notified' => 0,
-                'is_visible_on_front' => 0,
-            ],
-        ]);
-
-        $this->recordOrderHistory($order, $data['status'], $comment, $userId, ['magento_response' => $response]);
-        $refreshed = $this->refreshLocalOrderFromMagento($vendor, $order, $store);
-
-        return ['message' => 'Order status updated in Magento and synchronized locally', 'magento_response' => $response, 'order' => $refreshed];
-    }
-
-    public function cancelOrderInMagento(Vendor $vendor, Order $order, VendorStore $store, array $data = [], ?int $userId = null): array
-    {
-        $response = MagentoService::forVendor($vendor)->post("orders/{$order->magento_order_id}/cancel");
-        $this->recordOrderHistory($order, 'cancelled', $data['reason'] ?? $data['notes'] ?? 'Order cancelled in Magento', $userId, ['magento_response' => $response]);
-        $refreshed = $this->refreshLocalOrderFromMagento($vendor, $order, $store);
-
-        return ['message' => 'Order cancelled in Magento and synchronized locally', 'magento_response' => $response, 'order' => $refreshed];
-    }
-
-    public function holdOrderInMagento(Vendor $vendor, Order $order, VendorStore $store): array
-    {
-        $response = MagentoService::forVendor($vendor)->post("orders/{$order->magento_order_id}/hold");
-        $this->recordOrderHistory($order, 'holded', 'Order placed on hold in Magento', auth()->id(), ['magento_response' => $response]);
-        $refreshed = $this->refreshLocalOrderFromMagento($vendor, $order, $store);
-
-        return ['message' => 'Order placed on hold in Magento and synchronized locally', 'magento_response' => $response, 'order' => $refreshed];
-    }
-
-    public function unholdOrderInMagento(Vendor $vendor, Order $order, VendorStore $store): array
-    {
-        $response = MagentoService::forVendor($vendor)->post("orders/{$order->magento_order_id}/unHold");
-        $this->recordOrderHistory($order, 'unholded', 'Order released from hold in Magento', auth()->id(), ['magento_response' => $response]);
-        $refreshed = $this->refreshLocalOrderFromMagento($vendor, $order, $store);
-
-        return ['message' => 'Order released from hold in Magento and synchronized locally', 'magento_response' => $response, 'order' => $refreshed];
-    }
-
-    public function createInvoiceInMagento(Vendor $vendor, Order $order, VendorStore $store, array $invoiceData = []): array
-    {
-        $payload = [
-            'capture' => (bool) ($invoiceData['capture'] ?? true),
-            'notify' => (bool) ($invoiceData['notify'] ?? false),
-            'appendComment' => (bool) ($invoiceData['append_comment'] ?? !empty($invoiceData['comment'])),
-        ];
-
-        if (!empty($invoiceData['comment'])) {
-            $payload['comment'] = ['comment' => $invoiceData['comment'], 'is_visible_on_front' => 0];
+        $criteria = [];
+        $filterIndex = 0;
+        
+        // Filter by status
+        if (!empty($options['status'])) {
+            $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][field]"] = 'status';
+            $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][value]"] = $options['status'];
+            $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][condition_type]"] = 'eq';
+            $filterIndex++;
         }
 
-        $response = MagentoService::forVendor($vendor)->post("order/{$order->magento_order_id}/invoice", $payload);
-        $this->recordOrderHistory($order, 'invoiced', $invoiceData['comment'] ?? 'Invoice created in Magento', auth()->id(), ['magento_response' => $response]);
-        $refreshed = $this->refreshLocalOrderFromMagento($vendor, $order, $store);
-
-        return ['message' => 'Invoice created in Magento and order synchronized locally', 'magento_response' => $response, 'order' => $refreshed];
-    }
-
-    public function createShipmentInMagento(Vendor $vendor, Order $order, VendorStore $store, array $shipmentData = []): array
-    {
-        $payload = [
-            'notify' => (bool) ($shipmentData['notify'] ?? false),
-            'appendComment' => (bool) ($shipmentData['append_comment'] ?? !empty($shipmentData['comment'])),
-            'tracks' => $shipmentData['tracks'] ?? [],
-        ];
-
-        if (!empty($shipmentData['comment'])) {
-            $payload['comment'] = ['comment' => $shipmentData['comment'], 'is_visible_on_front' => 0];
+        // Filter by Magento store
+        if (!empty($options['magento_store_id'])) {
+            $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][field]"] = 'store_id';
+            $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][value]"] = $options['magento_store_id'];
+            $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][condition_type]"] = 'eq';
+            $filterIndex++;
         }
-
-        $response = MagentoService::forVendor($vendor)->post("order/{$order->magento_order_id}/ship", $payload);
-        foreach ($payload['tracks'] as $track) {
-            $this->upsertLocalTracking($order, $track);
+        
+        // Filter by date range
+        if (!empty($options['from_date'])) {
+            $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][field]"] = 'created_at';
+            $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][value]"] = $options['from_date'];
+            $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][condition_type]"] = 'gteq';
+            $filterIndex++;
         }
-        $this->recordOrderHistory($order, 'shipped', $shipmentData['comment'] ?? 'Shipment created in Magento', auth()->id(), ['magento_response' => $response]);
-        $refreshed = $this->refreshLocalOrderFromMagento($vendor, $order, $store);
-
-        return ['message' => 'Shipment created in Magento and order synchronized locally', 'magento_response' => $response, 'order' => $refreshed];
-    }
-
-    public function addTrackingInMagento(Vendor $vendor, Order $order, VendorStore $store, array $trackingData): array
-    {
-        $track = [
-            'track_number' => $trackingData['track_number'],
-            'title' => $trackingData['title'] ?? $trackingData['carrier_code'] ?? 'Tracking',
-            'carrier_code' => $trackingData['carrier_code'] ?? 'custom',
-        ];
-
-        if (!empty($trackingData['shipment_id'])) {
-            $response = MagentoService::forVendor($vendor)->post('shipment/track', [
-                'entity' => array_merge($track, [
-                    'parent_id' => (int) $trackingData['shipment_id'],
-                    'order_id' => $order->magento_order_id,
-                ]),
-            ]);
-        } else {
-            $response = MagentoService::forVendor($vendor)->post("order/{$order->magento_order_id}/ship", [
-                'notify' => false,
-                'appendComment' => true,
-                'comment' => ['comment' => 'Tracking added from admin', 'is_visible_on_front' => 0],
-                'tracks' => [$track],
-            ]);
+        
+        if (!empty($options['to_date'])) {
+            $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][field]"] = 'created_at';
+            $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][value]"] = $options['to_date'];
+            $criteria["searchCriteria[filter_groups][{$filterIndex}][filters][0][condition_type]"] = 'lteq';
+            $filterIndex++;
         }
-
-        $this->upsertLocalTracking($order, $track);
-        $this->recordOrderHistory($order, 'tracking_added', 'Tracking added in Magento', auth()->id(), ['tracking' => $track, 'magento_response' => $response]);
-        $refreshed = $this->refreshLocalOrderFromMagento($vendor, $order, $store);
-
-        return ['message' => 'Tracking added in Magento and synchronized locally', 'magento_response' => $response, 'order' => $refreshed];
+        
+        // Sort by created_at descending
+        $criteria["searchCriteria[sortOrders][0][field]"] = 'created_at';
+        $criteria["searchCriteria[sortOrders][0][direction]"] = 'DESC';
+        
+        return $criteria;
     }
 
-    public function addOrderCommentInMagento(Vendor $vendor, Order $order, VendorStore $store, array $commentData, ?int $userId = null): array
+    /**
+     * Determine payment status from Magento order data
+     * 
+     * @param array $magentoOrder
+     * @return string
+     */
+    protected function determinePaymentStatus(array $magentoOrder): string
     {
-        $status = $commentData['status'] ?? $order->status;
-        $response = MagentoService::forVendor($vendor)->post("orders/{$order->magento_order_id}/comments", [
-            'statusHistory' => [
-                'comment' => $commentData['comment'],
-                'status' => $status,
-                'is_customer_notified' => (int) ($commentData['is_customer_notified'] ?? 0),
-                'is_visible_on_front' => (int) ($commentData['is_visible_on_front'] ?? 0),
-            ],
-        ]);
-
-        $this->recordOrderHistory($order, $status, $commentData['comment'], $userId, ['magento_response' => $response]);
-        $refreshed = $this->refreshLocalOrderFromMagento($vendor, $order, $store);
-
-        return ['message' => 'Order comment added in Magento and synchronized locally', 'magento_response' => $response, 'order' => $refreshed];
-    }
-
-    public function refundOrderInMagento(Vendor $vendor, Order $order, VendorStore $store, array $refundData, ?int $userId = null): array
-    {
-        $response = MagentoService::forVendor($vendor)->post("order/{$order->magento_order_id}/refund", [
-            'notify' => (bool) ($refundData['notify'] ?? false),
-            'appendComment' => (bool) ($refundData['append_comment'] ?? true),
-            'comment' => ['comment' => $refundData['reason'] ?? $refundData['notes'] ?? 'Refund created from admin', 'is_visible_on_front' => 0],
-            'arguments' => [
-                'shipping_amount' => 0,
-                'adjustment_positive' => 0,
-                'adjustment_negative' => 0,
-                'extension_attributes' => ['return_to_stock_items' => []],
-            ],
-        ]);
-
-        $this->recordOrderHistory($order, 'refunded', $refundData['reason'] ?? 'Refund created in Magento', $userId, ['amount' => $refundData['amount'], 'magento_response' => $response]);
-        $refreshed = $this->refreshLocalOrderFromMagento($vendor, $order, $store);
-
-        return ['message' => 'Refund created in Magento and order synchronized locally', 'magento_response' => $response, 'order' => $refreshed];
-    }
-
-    public function reorderInMagento(Vendor $vendor, Order $order, VendorStore $store): array
-    {
-        $response = MagentoService::forVendor($vendor)->post("orders/{$order->magento_order_id}/reorder");
-        $this->recordOrderHistory($order, 'reordered', 'Reorder created in Magento', auth()->id(), ['magento_response' => $response]);
-        $syncResult = $this->syncOrdersFromMagento($vendor, [
-            'store_uuid' => $store->uuid,
-            'magento_store_id' => $store->magento_store_id,
-            'max_pages' => 1,
-            'only_create_missing' => false,
-        ]);
-
-        return ['message' => 'Reorder submitted in Magento and local orders synchronized', 'magento_response' => $response, 'sync' => $syncResult];
-    }
-
-    public function createOrderInMagento(Vendor $vendor, array $orderData): array
-    {
-        return MagentoService::forVendor($vendor)->post('orders/create', $orderData);
-    }
-
-    public function updateOrderInMagento(Vendor $vendor, int $orderId, array $orderData): array
-    {
-        return MagentoService::forVendor($vendor)->post("orders/{$orderId}/comments", ['statusHistory' => $orderData]);
-    }
-
-    public function deleteOrderInMagento(Vendor $vendor, int $orderId): array
-    {
-        return MagentoService::forVendor($vendor)->post("orders/{$orderId}/cancel");
-    }
-
-    protected function refreshLocalOrderFromMagento(Vendor $vendor, Order $order, VendorStore $store): Order
-    {
-        $magentoOrder = MagentoService::forVendor($vendor)->get("orders/{$order->magento_order_id}");
-        $this->syncSingleOrder($magentoOrder, $vendor, [
-            'store_uuid' => $store->uuid,
-            'magento_store_id' => $store->magento_store_id,
-            'only_create_missing' => false,
-        ]);
-
-        return $order->fresh(['vendor', 'vendorStore', 'customer', 'items', 'tracking', 'statusHistory']);
-    }
-
-    protected function recordOrderHistory(Order $order, string $status, ?string $notes = null, ?int $userId = null, array $metadata = []): void
-    {
-        OrderStatusHistory::create([
-            'order_id' => $order->id,
-            'status' => $status,
-            'notes' => $notes,
-            'changed_by' => $userId,
-            'metadata' => $metadata,
-        ]);
-    }
-
-    protected function upsertLocalTracking(Order $order, array $track): void
-    {
-        $trackingNumber = $track['track_number'] ?? $track['tracking_number'] ?? null;
-
-        if (!$trackingNumber) {
-            return;
+        $orderStatus = strtolower($magentoOrder['status'] ?? '');
+        
+        if (in_array($orderStatus, ['canceled', 'cancelled'])) {
+            return 'refunded';
         }
-
-        OrderTracking::updateOrCreate(
-            ['order_id' => $order->id, 'tracking_number' => $trackingNumber],
-            [
-                'status' => 'created',
-                'last_update' => now(),
-                'tracking_events' => [[
-                    'status' => 'created',
-                    'description' => 'Tracking added in Magento',
-                    'timestamp' => now()->toIso8601String(),
-                ]],
-            ]
-        );
-
-        $order->update(['tracking_number' => $trackingNumber]);
+        
+        if ($orderStatus === 'closed') {
+            return 'paid';
+        }
+        
+        // Check payment information
+        if (isset($magentoOrder['payment']['additional_information'])) {
+            $paymentInfo = $magentoOrder['payment']['additional_information'];
+            if (is_array($paymentInfo) && in_array('captured', $paymentInfo)) {
+                return 'paid';
+            }
+        }
+        
+        if (in_array($orderStatus, ['pending', 'pending_payment'])) {
+            return 'pending';
+        }
+        
+        if (in_array($orderStatus, ['processing', 'complete', 'closed'])) {
+            return 'paid';
+        }
+        
+        return 'pending';
     }
 
+    /**
+     * Format address for Magento API
+     * 
+     * @param array $address
+     * @param string $email
+     * @return array
+     */
     protected function formatMagentoAddress(array $address, string $email): array
     {
         $street = $address['street'] ?? '';
@@ -1181,6 +751,14 @@ class OrderService
         ];
     }
 
+    /**
+     * Find the most recent Magento order for a customer
+     * 
+     * @param MagentoService $magentoService
+     * @param int $customerId
+     * @param int $magentoStoreId
+     * @return array|null
+     */
     protected function findLatestMagentoOrderForCustomer(MagentoService $magentoService, int $customerId, int $magentoStoreId): ?array
     {
         $response = $magentoService->get('orders', [
@@ -1197,5 +775,26 @@ class OrderService
         ]);
 
         return $response['items'][0] ?? null;
+    }
+
+    /**
+     * Record order status history
+     * 
+     * @param Order $order
+     * @param string $status
+     * @param string|null $notes
+     * @param int|null $userId
+     * @param array $metadata
+     * @return void
+     */
+    protected function recordOrderHistory(Order $order, string $status, ?string $notes = null, ?int $userId = null, array $metadata = []): void
+    {
+        OrderStatusHistory::create([
+            'order_id' => $order->id,
+            'status' => $status,
+            'notes' => $notes,
+            'changed_by' => $userId,
+            'metadata' => $metadata,
+        ]);
     }
 }

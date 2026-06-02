@@ -84,9 +84,7 @@ class AdminVendorController extends Controller
             ],
         ]);
     }
-    /**
-     * Create a new vendor (admin adds vendor manually)
-     */
+
     /**
      * Create a new vendor (admin adds vendor manually)
      */

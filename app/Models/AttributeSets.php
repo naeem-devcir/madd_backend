@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Str;
 
-class MagentoAttributeSet extends Model
+class AttributeSets extends Model
 {
     use HasFactory, SoftDeletes;
 
