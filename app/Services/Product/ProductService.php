@@ -25,7 +25,7 @@ class ProductService
     }
 
 
-  public function fetchAllProducts(array $filters = []): array
+    public function fetchAllProducts(array $filters = []): array
     {
         try {
             $query = [];
@@ -85,8 +85,8 @@ class ProductService
                 'message' => $e->getMessage(),
                 'vendor_id' => $this->vendor->id,
             ]);
-
-            throw new Exception('Failed to fetch Magento products: ' . $e->getMessage());
+            $filteredMessage = $this->extractErrorMessage($e->getMessage());
+            throw new Exception('Failed to fetch Magento products: ' . $filteredMessage);
         }
     }
 
@@ -143,11 +143,12 @@ class ProductService
                 'sku' => $sku,
             ];
         } catch (\Exception $e) {
+            $filteredMessage = $this->extractErrorMessage($e->getMessage());
             Log::error('Magento Product Creation Failed: ' . $e->getMessage(), [
                 'trace' => $e->getTraceAsString(),
                 'sku' => $formData['sku'] ?? 'unknown',
             ]);
-            throw new Exception('Product creation failed: ' . $e->getMessage());
+            throw new Exception('Product creation failed: ' . $filteredMessage);
         }
     }
 
@@ -155,168 +156,167 @@ class ProductService
      * Create Configurable Product
      * Order: Children → Parent → Link Options → Link Children
      */
-public function createConfigurableProduct(array $formData): array
-{
-    try {
-        $parentSku     = $formData['sku'];
-        $childVariants = $formData['configurable_variants'] ?? [];
-        $configOptions = $formData['configurable_options']  ?? [];  // single source, no fallback chain
+    public function createConfigurableProduct(array $formData): array
+    {
+        try {
+            $parentSku     = $formData['sku'];
+            $childVariants = $formData['configurable_variants'] ?? [];
+            $configOptions = $formData['configurable_options']  ?? [];  // single source, no fallback chain
 
-        \Log::info('createConfigurableProduct received', [
-            'sku'           => $parentSku,
-            'options_count' => count($configOptions),
-            'options'       => $configOptions,
-            'variants_count'=> count($childVariants),
-        ]);
+            \Log::info('createConfigurableProduct received', [
+                'sku'           => $parentSku,
+                'options_count' => count($configOptions),
+                'options'       => $configOptions,
+                'variants_count' => count($childVariants),
+            ]);
 
-        if (empty($childVariants)) {
-            throw new \Exception('Configurable products require at least one variant');
+            if (empty($childVariants)) {
+                throw new \Exception('Configurable products require at least one variant');
+            }
+
+            if (empty($configOptions)) {
+                throw new \Exception(
+                    'configurable_options missing. Keys received: ' . implode(', ', array_keys($formData))
+                );
+            }
+
+            // STEP 1: Create parent
+            $parentPayload = $this->buildConfigurableParentPayload($formData);
+            $parent = $this->magento->post('products', $parentPayload);
+
+            // STEP 2: Add configurable options to parent BEFORE linking children
+            $this->addConfigurableOptions($parentSku, $configOptions);
+
+            // STEP 3: Create children
+            $childSkus = [];
+            foreach ($childVariants as $childData) {
+                $childSku    = $this->createConfigurableChild($parentSku, $childData);
+                $childSkus[] = $childSku;
+            }
+
+            // STEP 4: Link children to parent
+            foreach ($childSkus as $childSku) {
+                $this->linkChildToParent($parentSku, $childSku);
+            }
+
+            // STEP 5: Post-processing
+            if (!empty($formData['category_ids'])) {
+                $this->assignCategories($parentSku, $formData['category_ids']);
+            }
+            if (!empty($formData['product_links'])) {
+                $this->assignProductLinks($parentSku, $formData['product_links']);
+            }
+            if (!empty($formData['tier_prices'])) {
+                $this->setTierPrices($parentSku, $formData['tier_prices']);
+            }
+            if (!empty($formData['inventory'])) {
+                $this->assignMSIInventory($parentSku, $formData['inventory']);
+            }
+
+            return [
+                'success'    => true,
+                'message'    => 'Configurable product created successfully',
+                'parent_sku' => $parentSku,
+                'child_skus' => $childSkus,
+                'product'    => $parent,
+                'sku'        => $parentSku,
+            ];
+        } catch (\Exception $e) {
+            $filteredMessage = $this->extractErrorMessage($e->getMessage());
+            $this->cleanupFailedConfigurable($parentSku ?? null, $childSkus ?? []);
+            Log::error('Configurable Product Creation Failed: ' . $e->getMessage(), [
+                'sku' => $formData['sku'] ?? 'unknown',
+            ]);
+            throw new \Exception('Configurable product creation failed: ' . $filteredMessage);
         }
-
-        if (empty($configOptions)) {
-            throw new \Exception(
-                'configurable_options missing. Keys received: ' . implode(', ', array_keys($formData))
-            );
-        }
-
-        // STEP 1: Create parent
-        $parentPayload = $this->buildConfigurableParentPayload($formData);
-        $parent = $this->magento->post('products', $parentPayload);
-
-        // STEP 2: Add configurable options to parent BEFORE linking children
-        $this->addConfigurableOptions($parentSku, $configOptions);
-
-        // STEP 3: Create children
-        $childSkus = [];
-        foreach ($childVariants as $childData) {
-            $childSku    = $this->createConfigurableChild($parentSku, $childData);
-            $childSkus[] = $childSku;
-        }
-
-        // STEP 4: Link children to parent
-        foreach ($childSkus as $childSku) {
-            $this->linkChildToParent($parentSku, $childSku);
-        }
-
-        // STEP 5: Post-processing
-        if (!empty($formData['category_ids'])) {
-            $this->assignCategories($parentSku, $formData['category_ids']);
-        }
-        if (!empty($formData['product_links'])) {
-            $this->assignProductLinks($parentSku, $formData['product_links']);
-        }
-        if (!empty($formData['tier_prices'])) {
-            $this->setTierPrices($parentSku, $formData['tier_prices']);
-        }
-        if (!empty($formData['inventory'])) {
-            $this->assignMSIInventory($parentSku, $formData['inventory']);
-        }
-
-        return [
-            'success'    => true,
-            'message'    => 'Configurable product created successfully',
-            'parent_sku' => $parentSku,
-            'child_skus' => $childSkus,
-            'product'    => $parent,
-            'sku'        => $parentSku,
-        ];
-
-    } catch (\Exception $e) {
-        $this->cleanupFailedConfigurable($parentSku ?? null, $childSkus ?? []);
-
-        Log::error('Configurable Product Creation Failed: ' . $e->getMessage(), [
-            'sku' => $formData['sku'] ?? 'unknown',
-        ]);
-        throw new \Exception('Configurable product creation failed: ' . $e->getMessage());
     }
-}
 
-/**
- * Generate variants from configurable options
- */
-protected function generateVariantsFromOptions(array $formData, array $configOptions): array
-{
-    $variants = [];
-    $baseSku = $formData['sku'];
-    $baseName = $formData['name'];
-    $basePrice = $formData['price'] ?? 0;
-    $baseWeight = $formData['weight'] ?? 0;
-    
-    // Get all selected attribute values
-    $attributeValueSets = [];
-    $attributeCodes = [];
-    
-    foreach ($configOptions as $option) {
-        $attributeId = $option['attribute_id'];
-        $values = $option['values'];
-        
-        // You need to fetch actual value labels from attribute values
-        // For now, use value_index as the identifier
-        $valueSet = [];
-        foreach ($values as $value) {
-            $valueSet[] = [
-                'value_index' => $value['value_index'],
-                'label' => 'Value ' . $value['value_index'] // You can enhance this
+    /**
+     * Generate variants from configurable options
+     */
+    protected function generateVariantsFromOptions(array $formData, array $configOptions): array
+    {
+        $variants = [];
+        $baseSku = $formData['sku'];
+        $baseName = $formData['name'];
+        $basePrice = $formData['price'] ?? 0;
+        $baseWeight = $formData['weight'] ?? 0;
+
+        // Get all selected attribute values
+        $attributeValueSets = [];
+        $attributeCodes = [];
+
+        foreach ($configOptions as $option) {
+            $attributeId = $option['attribute_id'];
+            $values = $option['values'];
+
+            // You need to fetch actual value labels from attribute values
+            // For now, use value_index as the identifier
+            $valueSet = [];
+            foreach ($values as $value) {
+                $valueSet[] = [
+                    'value_index' => $value['value_index'],
+                    'label' => 'Value ' . $value['value_index'] // You can enhance this
+                ];
+            }
+            $attributeValueSets[] = $valueSet;
+
+            // Get attribute code - you might need to fetch this from Magento
+            $attributeCodes[] = 'attribute_' . $attributeId;
+        }
+
+        // Generate cartesian product
+        $combinations = $this->cartesianProductForVariants($attributeValueSets);
+
+        // Create variants from combinations
+        foreach ($combinations as $index => $combination) {
+            $variantSku = $baseSku . '-' . str_pad($index + 1, 3, '0', STR_PAD_LEFT);
+
+            $variantName = $baseName;
+            $configAttributes = [];
+
+            foreach ($combination as $idx => $value) {
+                $variantName .= ' - ' . ($value['label'] ?? $value['value_index']);
+                $configAttributes[$attributeCodes[$idx]] = $value['value_index'];
+            }
+
+            $variants[] = [
+                'sku' => $variantSku,
+                'name' => $variantName,
+                'price' => $basePrice,
+                'quantity' => 0,
+                'weight' => $baseWeight,
+                'configurable_attributes' => $configAttributes
             ];
         }
-        $attributeValueSets[] = $valueSet;
-        
-        // Get attribute code - you might need to fetch this from Magento
-        $attributeCodes[] = 'attribute_' . $attributeId;
-    }
-    
-    // Generate cartesian product
-    $combinations = $this->cartesianProductForVariants($attributeValueSets);
-    
-    // Create variants from combinations
-    foreach ($combinations as $index => $combination) {
-        $variantSku = $baseSku . '-' . str_pad($index + 1, 3, '0', STR_PAD_LEFT);
-        
-        $variantName = $baseName;
-        $configAttributes = [];
-        
-        foreach ($combination as $idx => $value) {
-            $variantName .= ' - ' . ($value['label'] ?? $value['value_index']);
-            $configAttributes[$attributeCodes[$idx]] = $value['value_index'];
-        }
-        
-        $variants[] = [
-            'sku' => $variantSku,
-            'name' => $variantName,
-            'price' => $basePrice,
-            'quantity' => 0,
-            'weight' => $baseWeight,
-            'configurable_attributes' => $configAttributes
-        ];
-    }
-    
-    return $variants;
-}
 
-/**
- * Helper for cartesian product
- */
-protected function cartesianProductForVariants(array $arrays): array
-{
-    if (empty($arrays)) {
-        return [[]];
+        return $variants;
     }
-    
-    $result = [[]];
-    foreach ($arrays as $array) {
-        $temp = [];
-        foreach ($result as $existing) {
-            foreach ($array as $item) {
-                $temp[] = array_merge($existing, [$item]);
+
+    /**
+     * Helper for cartesian product
+     */
+    protected function cartesianProductForVariants(array $arrays): array
+    {
+        if (empty($arrays)) {
+            return [[]];
+        }
+
+        $result = [[]];
+        foreach ($arrays as $array) {
+            $temp = [];
+            foreach ($result as $existing) {
+                foreach ($array as $item) {
+                    $temp[] = array_merge($existing, [$item]);
+                }
             }
+            $result = $temp;
         }
-        $result = $temp;
-    }
-    
-    return $result;
-}
 
-    
+        return $result;
+    }
+
+
     /**
      * Create Grouped Product
      */
@@ -349,8 +349,9 @@ protected function cartesianProductForVariants(array $arrays): array
                 'sku' => $sku,
             ];
         } catch (\Exception $e) {
+            $filteredMessage = $this->extractErrorMessage($e->getMessage());
             Log::error('Grouped Product Creation Failed: ' . $e->getMessage());
-            throw new Exception('Grouped product creation failed: ' . $e->getMessage());
+            throw new Exception('Grouped product creation failed: ' . $filteredMessage);
         }
     }
 
@@ -381,8 +382,9 @@ protected function cartesianProductForVariants(array $arrays): array
                 'sku' => $sku,
             ];
         } catch (\Exception $e) {
+            $filteredMessage = $this->extractErrorMessage($e->getMessage());
             Log::error('Bundle Product Creation Failed: ' . $e->getMessage());
-            throw new Exception('Bundle product creation failed: ' . $e->getMessage());
+            throw new Exception('Bundle product creation failed: ' . $filteredMessage);
         }
     }
 
@@ -417,8 +419,9 @@ protected function cartesianProductForVariants(array $arrays): array
                 'sku' => $sku,
             ];
         } catch (\Exception $e) {
+            $filteredMessage = $this->extractErrorMessage($e->getMessage());
             Log::error('Downloadable Product Creation Failed: ' . $e->getMessage());
-            throw new Exception('Downloadable product creation failed: ' . $e->getMessage());
+            throw new Exception('Downloadable product creation failed: ' . $filteredMessage);
         }
     }
 
@@ -448,161 +451,162 @@ protected function cartesianProductForVariants(array $arrays): array
                 'sku' => $sku,
             ];
         } catch (\Exception $e) {
+            $filteredMessage = $this->extractErrorMessage($e->getMessage());
             Log::error('Gift Card Product Creation Failed: ' . $e->getMessage());
-            throw new Exception('Gift card product creation failed: ' . $e->getMessage());
+            throw new Exception('Gift card product creation failed: ' . $filteredMessage);
         }
     }
 
     // ============ CONFIGURABLE HELPER METHODS ============
 
-protected function createConfigurableChild(string $parentSku, array $childData): string
-{
-    $childSku = $childData['sku'];
-    
-    // Build custom attributes array
-    $customAttributes = $this->buildCustomAttributes($childData);
-    
-    // Add configurable attributes as custom attributes on the child product
-    if (!empty($childData['configurable_attributes'])) {
-        foreach ($childData['configurable_attributes'] as $attributeCode => $value) {
-            $customAttributes[] = [
-                'attribute_code' => $attributeCode,
-                'value' => (string) $value
-            ];
-        }
-    }
+    protected function createConfigurableChild(string $parentSku, array $childData): string
+    {
+        $childSku = $childData['sku'];
 
-    $mediaGalleryEntries = $this->buildMediaGalleryEntries($childData);
-    $quantity = $childData['quantity'] ?? 0;
+        // Build custom attributes array
+        $customAttributes = $this->buildCustomAttributes($childData);
 
-    // FIX: The payload structure was incorrect
-    $payload = [
-        'product' => [  // This wrapper was missing
-            'sku' => $childSku,
-            'name' => $childData['name'] ?? "{$parentSku} Variant",
-            'attribute_set_id' => (int)($childData['attribute_set_id'] ?? 4),
-            'price' => (float)($childData['price'] ?? 0),
-            'status' => 1,
-            'visibility' => 1, // Not visible individually
-            'type_id' => 'simple',
-            'weight' => isset($childData['weight']) ? (float) $childData['weight'] : null,
-            'extension_attributes' => [
-                'website_ids' => $childData['website_ids'] ?? [1],
-                'stock_item' => [
-                    'qty' => (int) $quantity,
-                    'is_in_stock' => $quantity > 0 ? 1 : 0,
-                    'manage_stock' => 1,
-                    'use_config_manage_stock' => 0,
-                ],
-            ],
-            'custom_attributes' => $customAttributes,
-        ],
-    ];
-
-    if (!empty($mediaGalleryEntries)) {
-        $payload['product']['media_gallery_entries'] = $mediaGalleryEntries;
-    }
-
-    if (in_array($childData['type_id'] ?? 'simple', ['virtual', 'downloadable'])) {
-        unset($payload['product']['weight']);
-        unset($payload['product']['extension_attributes']['stock_item']);
-    }
-
-    // Log the payload for debugging
-    \Log::info('Creating configurable child', [
-        'child_sku' => $childSku,
-        'parent_sku' => $parentSku,
-        'configurable_attributes' => $childData['configurable_attributes'] ?? [],
-        'payload' => $payload
-    ]);
-
-    $this->magento->post('products', $payload);
-
-    return $childSku;
-}
-
-    protected function buildConfigurableParentPayload(array $data): array
-{
-    $payload = [
-        'product' => [  // This wrapper was missing
-            'sku' => $data['sku'],
-            'name' => $data['name'],
-            'attribute_set_id' => (int)($data['attribute_set_id'] ?? 4),
-            'status' => (int)($data['status'] ?? 1),
-            'visibility' => (int)($data['visibility'] ?? 4),
-            'type_id' => 'configurable',
-            'price' => (float)($data['price'] ?? 0),
-            'extension_attributes' => [
-                'website_ids' => $data['website_ids'] ?? [1],
-            ],
-            'custom_attributes' => $this->buildCustomAttributes($data),
-        ],
-    ];
-
-    return $payload;
-}
-
-protected function addConfigurableOptions(string $parentSku, array $configOptions): void
-{
-    foreach ($configOptions as $index => $option) {
-
-        // Guard against malformed options
-        if (empty($option['attribute_id'])) {
-            throw new \Exception("configurable_options[{$index}] is missing 'attribute_id'");
-        }
-        if (!isset($option['label'])) {
-            throw new \Exception("configurable_options[{$index}] is missing 'label'");
-        }
-        if (empty($option['values'])) {
-            throw new \Exception("configurable_options[{$index}] is missing 'values'");
+        // Add configurable attributes as custom attributes on the child product
+        if (!empty($childData['configurable_attributes'])) {
+            foreach ($childData['configurable_attributes'] as $attributeCode => $value) {
+                $customAttributes[] = [
+                    'attribute_code' => $attributeCode,
+                    'value' => (string) $value
+                ];
+            }
         }
 
+        $mediaGalleryEntries = $this->buildMediaGalleryEntries($childData);
+        $quantity = $childData['quantity'] ?? 0;
+
+        // FIX: The payload structure was incorrect
         $payload = [
-            'option' => [
-                'attribute_id'   => (int) $option['attribute_id'],
-                'label'          => $option['label'],
-                'position'       => (int) ($option['position'] ?? $index),
-                'is_use_default' => true,
-                'values'         => array_map(fn($v) => [
-                    'value_index' => (int) $v['value_index'],
-                ], $option['values']),
+            'product' => [  // This wrapper was missing
+                'sku' => $childSku,
+                'name' => $childData['name'] ?? "{$parentSku} Variant",
+                'attribute_set_id' => (int)($childData['attribute_set_id'] ?? 4),
+                'price' => (float)($childData['price'] ?? 0),
+                'status' => 1,
+                'visibility' => 1, // Not visible individually
+                'type_id' => 'simple',
+                'weight' => isset($childData['weight']) ? (float) $childData['weight'] : null,
+                'extension_attributes' => [
+                    'website_ids' => $childData['website_ids'] ?? [1],
+                    'stock_item' => [
+                        'qty' => (int) $quantity,
+                        'is_in_stock' => $quantity > 0 ? 1 : 0,
+                        'manage_stock' => 1,
+                        'use_config_manage_stock' => 0,
+                    ],
+                ],
+                'custom_attributes' => $customAttributes,
             ],
         ];
 
-        \Log::info("Adding configurable option [{$index}] to {$parentSku}", [
-            'attribute_id' => $option['attribute_id'],
-            'label'        => $option['label'],
-            'values_count' => count($option['values']),
+        if (!empty($mediaGalleryEntries)) {
+            $payload['product']['media_gallery_entries'] = $mediaGalleryEntries;
+        }
+
+        if (in_array($childData['type_id'] ?? 'simple', ['virtual', 'downloadable'])) {
+            unset($payload['product']['weight']);
+            unset($payload['product']['extension_attributes']['stock_item']);
+        }
+
+        // Log the payload for debugging
+        \Log::info('Creating configurable child', [
+            'child_sku' => $childSku,
+            'parent_sku' => $parentSku,
+            'configurable_attributes' => $childData['configurable_attributes'] ?? [],
+            'payload' => $payload
         ]);
 
-        $this->magento->post("configurable-products/{$parentSku}/options", $payload);
+        $this->magento->post('products', $payload);
+
+        return $childSku;
     }
-}
+
+    protected function buildConfigurableParentPayload(array $data): array
+    {
+        $payload = [
+            'product' => [  // This wrapper was missing
+                'sku' => $data['sku'],
+                'name' => $data['name'],
+                'attribute_set_id' => (int)($data['attribute_set_id'] ?? 4),
+                'status' => (int)($data['status'] ?? 1),
+                'visibility' => (int)($data['visibility'] ?? 4),
+                'type_id' => 'configurable',
+                'price' => (float)($data['price'] ?? 0),
+                'extension_attributes' => [
+                    'website_ids' => $data['website_ids'] ?? [1],
+                ],
+                'custom_attributes' => $this->buildCustomAttributes($data),
+            ],
+        ];
+
+        return $payload;
+    }
+
+    protected function addConfigurableOptions(string $parentSku, array $configOptions): void
+    {
+        foreach ($configOptions as $index => $option) {
+
+            // Guard against malformed options
+            if (empty($option['attribute_id'])) {
+                throw new \Exception("configurable_options[{$index}] is missing 'attribute_id'");
+            }
+            if (!isset($option['label'])) {
+                throw new \Exception("configurable_options[{$index}] is missing 'label'");
+            }
+            if (empty($option['values'])) {
+                throw new \Exception("configurable_options[{$index}] is missing 'values'");
+            }
+
+            $payload = [
+                'option' => [
+                    'attribute_id'   => (int) $option['attribute_id'],
+                    'label'          => $option['label'],
+                    'position'       => (int) ($option['position'] ?? $index),
+                    'is_use_default' => true,
+                    'values'         => array_map(fn($v) => [
+                        'value_index' => (int) $v['value_index'],
+                    ], $option['values']),
+                ],
+            ];
+
+            \Log::info("Adding configurable option [{$index}] to {$parentSku}", [
+                'attribute_id' => $option['attribute_id'],
+                'label'        => $option['label'],
+                'values_count' => count($option['values']),
+            ]);
+
+            $this->magento->post("configurable-products/{$parentSku}/options", $payload);
+        }
+    }
 
     protected function linkChildToParent(string $parentSku, string $childSku): void
     {
         $this->magento->post("configurable-products/{$parentSku}/child", ['childSku' => $childSku]);
     }
-protected function cleanupFailedConfigurable(?string $parentSku, array $childSkus): void
-{
-    // Delete children first (parent can't be deleted while children are linked)
-    foreach ($childSkus as $childSku) {
-        try {
-            $this->magento->delete("products/{$childSku}");
-        } catch (\Exception $e) {
-            Log::warning("Cleanup: failed to delete child {$childSku}: " . $e->getMessage());
+    protected function cleanupFailedConfigurable(?string $parentSku, array $childSkus): void
+    {
+        // Delete children first (parent can't be deleted while children are linked)
+        foreach ($childSkus as $childSku) {
+            try {
+                $this->magento->delete("products/{$childSku}");
+            } catch (\Exception $e) {
+                Log::warning("Cleanup: failed to delete child {$childSku}: " . $e->getMessage());
+            }
         }
-    }
 
-    // Then delete parent
-    if ($parentSku) {
-        try {
-            $this->magento->delete("products/{$parentSku}");
-        } catch (\Exception $e) {
-            Log::warning("Cleanup: failed to delete parent {$parentSku}: " . $e->getMessage());
+        // Then delete parent
+        if ($parentSku) {
+            try {
+                $this->magento->delete("products/{$parentSku}");
+            } catch (\Exception $e) {
+                Log::warning("Cleanup: failed to delete parent {$parentSku}: " . $e->getMessage());
+            }
         }
     }
-}
     // ============ GROUPED HELPER METHODS ============
 
     protected function buildGroupedParentPayload(array $data): array
@@ -1248,54 +1252,55 @@ protected function cleanupFailedConfigurable(?string $parentSku, array $childSku
      * Get all product attributes from Magento
      * This is a wrapper that passes the endpoint to MagentoService
      */
-public function getProductAttributes(): array
-{
-    try {
-        // Get all query parameters from the request
-        $queryParams = request()->query();
-        
-        // Build parameters array for Magento API
-        // Magento expects parameters like: searchCriteria[currentPage], searchCriteria[pageSize], etc.
-        $magentoParams = [];
-        
-        foreach ($queryParams as $key => $value) {
-            // Pass through any searchCriteria parameters as-is
-            if (strpos($key, 'searchCriteria') === 0) {
-                $magentoParams[$key] = $value;
+    public function getProductAttributes(): array
+    {
+        try {
+            // Get all query parameters from the request
+            $queryParams = request()->query();
+
+            // Build parameters array for Magento API
+            // Magento expects parameters like: searchCriteria[currentPage], searchCriteria[pageSize], etc.
+            $magentoParams = [];
+
+            foreach ($queryParams as $key => $value) {
+                // Pass through any searchCriteria parameters as-is
+                if (strpos($key, 'searchCriteria') === 0) {
+                    $magentoParams[$key] = $value;
+                }
             }
+
+            // Set default pagination if not provided
+            if (!isset($magentoParams['searchCriteria[currentPage]'])) {
+                $magentoParams['searchCriteria[currentPage]'] = 1;
+            }
+            if (!isset($magentoParams['searchCriteria[pageSize]'])) {
+                $magentoParams['searchCriteria[pageSize]'] = 100;
+            }
+
+            Log::info('Fetching product attributes from Magento', [
+                'vendor_id' => $this->vendor->id,
+                'params' => $magentoParams
+            ]);
+
+            // Call Magento API with parameters
+            $response = $this->magento->get('products/attributes', $magentoParams);
+
+            // Return items if they exist, otherwise return empty array
+            if (isset($response['items'])) {
+                return $response['items'];
+            }
+
+            return $response;
+        } catch (\Exception $e) {
+            $filteredMessage = $this->extractErrorMessage($e->getMessage());
+            Log::error('Failed to fetch product attributes from Magento', [
+                'error' => $e->getMessage(),
+                'vendor_id' => $this->vendor->id,
+                'params' => $magentoParams ?? []
+            ]);
+            throw new Exception('Failed to fetch product attributes: ' . $filteredMessage);
         }
-        
-        // Set default pagination if not provided
-        if (!isset($magentoParams['searchCriteria[currentPage]'])) {
-            $magentoParams['searchCriteria[currentPage]'] = 1;
-        }
-        if (!isset($magentoParams['searchCriteria[pageSize]'])) {
-            $magentoParams['searchCriteria[pageSize]'] = 100;
-        }
-        
-        Log::info('Fetching product attributes from Magento', [
-            'vendor_id' => $this->vendor->id,
-            'params' => $magentoParams
-        ]);
-        
-        // Call Magento API with parameters
-        $response = $this->magento->get('products/attributes', $magentoParams);
-        
-        // Return items if they exist, otherwise return empty array
-        if (isset($response['items'])) {
-            return $response['items'];
-        }
-        
-        return $response;
-    } catch (\Exception $e) {
-        Log::error('Failed to fetch product attributes from Magento', [
-            'error' => $e->getMessage(),
-            'vendor_id' => $this->vendor->id,
-            'params' => $magentoParams ?? []
-        ]);
-        throw new Exception('Failed to fetch product attributes: ' . $e->getMessage());
     }
-}
 
     /**
      * Get specific attribute details by ID
@@ -1306,11 +1311,12 @@ public function getProductAttributes(): array
             // Pass the specific attribute endpoint
             return $this->magento->get("products/attributes/{$attributeId}");
         } catch (\Exception $e) {
+            $filteredMessage = $this->extractErrorMessage($e->getMessage());
             Log::error("Failed to fetch attribute {$attributeId} from Magento", [
                 'error' => $e->getMessage(),
                 'vendor_id' => $this->vendor->id
             ]);
-            throw new Exception("Failed to fetch attribute: " . $e->getMessage());
+            throw new Exception("Failed to fetch attribute: " . $filteredMessage);
         }
     }
 
@@ -1348,30 +1354,31 @@ public function getProductAttributes(): array
      * Get configurable attributes only (filtered for configurable product types)
      * Common configurable attributes: color, size, material, style, etc.
      */
-public function getConfigurableAttributes(array $queryParams = []): array
-{
-    try {
-        // Pass query params to Magento
-        $response = $this->magento->get('products/attributes', $queryParams);
-        
-        $allAttributes = $response['items'] ?? [];
-        
-        // Filter for configurable attributes
-        $configurableCodes = ['color', 'size', 'material', 'style', 'brand'];
-        
-        $configurableAttributes = array_filter($allAttributes, function ($attr) use ($configurableCodes) {
-            return in_array($attr['attribute_code'], $configurableCodes);
-        });
-        
-        return array_values($configurableAttributes);
-    } catch (\Exception $e) {
-        Log::error('Failed to fetch configurable attributes', [
-            'error' => $e->getMessage(),
-            'vendor_id' => $this->vendor->id
-        ]);
-        throw new Exception('Failed to fetch configurable attributes: ' . $e->getMessage());
+    public function getConfigurableAttributes(array $queryParams = []): array
+    {
+        try {
+            // Pass query params to Magento
+            $response = $this->magento->get('products/attributes', $queryParams);
+
+            $allAttributes = $response['items'] ?? [];
+
+            // Filter for configurable attributes
+            $configurableCodes = ['color', 'size', 'material', 'style', 'brand'];
+
+            $configurableAttributes = array_filter($allAttributes, function ($attr) use ($configurableCodes) {
+                return in_array($attr['attribute_code'], $configurableCodes);
+            });
+
+            return array_values($configurableAttributes);
+        } catch (\Exception $e) {
+            $filteredMessage = $this->extractErrorMessage($e->getMessage());
+            Log::error('Failed to fetch configurable attributes', [
+                'error' => $e->getMessage(),
+                'vendor_id' => $this->vendor->id
+            ]);
+            throw new Exception('Failed to fetch configurable attributes: ' . $filteredMessage);
+        }
     }
-}
 
     /**
      * Get attributes by specific attribute codes
@@ -1393,16 +1400,17 @@ public function getConfigurableAttributes(array $queryParams = []): array
 
             return array_values($filteredAttributes);
         } catch (\Exception $e) {
+            $filteredMessage = $this->extractErrorMessage($e->getMessage());
             Log::error('Failed to fetch attributes by codes', [
                 'codes' => $attributeCodes,
                 'error' => $e->getMessage(),
                 'vendor_id' => $this->vendor->id
             ]);
-            throw new Exception('Failed to fetch attributes: ' . $e->getMessage());
+            throw new Exception('Failed to fetch attributes: ' . $filteredMessage);
         }
     }
 
-public function updateProduct(string $sku, array $data): array
+    public function updateProduct(string $sku, array $data): array
     {
         $payload = [
             'product' => [
@@ -1425,7 +1433,28 @@ public function updateProduct(string $sku, array $data): array
 
         return $this->magento->put("products/{$sku}", $payload);
     }
+    protected function extractErrorMessage(string $exceptionMessage, string $fallbackMessage = 'Product creation failed'): string
+    {
+        // Try to extract the JSON message part first
+        if (preg_match('/{"message":"([^"]+)"/', $exceptionMessage, $matches)) {
+            $jsonMessage = $matches[1];
+            // Get the first sentence or up to first dot
+            $dotPosition = strpos($jsonMessage, '.');
+            if ($dotPosition !== false) {
+                return substr($jsonMessage, 0, $dotPosition + 1);
+            }
+            return $jsonMessage;
+        }
 
+        // If no JSON found, try to get the first sentence from plain text
+        $dotPosition = strpos($exceptionMessage, '.');
+        if ($dotPosition !== false && $dotPosition < 200) { // Limit to first 200 chars
+            return substr($exceptionMessage, 0, $dotPosition + 1);
+        }
+
+        // Fallback: return first 150 characters
+        return substr($exceptionMessage, 0, 150) . (strlen($exceptionMessage) > 150 ? '...' : '');
+    }
 
     /**
      * Delete product from Magento by SKU

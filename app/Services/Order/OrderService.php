@@ -506,7 +506,7 @@ class OrderService
     }
 
     // ─────────────────────────────────────────────────────
-    // MANUAL ORDER CREATION METHODS
+    // MANUAL ORDER CREATION METHODS (IMPROVED)
     // ─────────────────────────────────────────────────────
 
     /**
@@ -519,6 +519,7 @@ class OrderService
      * @return array
      * @throws \Exception
      */
+
     public function createManualOrderInMagento(Vendor $vendor, VendorStore $store, array $orderData, ?int $userId = null): array
     {
         $magentoService = MagentoService::forVendor($vendor);
@@ -531,19 +532,23 @@ class OrderService
         DB::beginTransaction();
 
         try {
-            // Step 1: Create cart for customer
-            $cartIdResponse = $magentoService->post("customers/{$customerId}/carts");
-            $cartId = $cartIdResponse['value'] ?? $cartIdResponse['id'] ?? $cartIdResponse['cart_id'] ?? null;
+            // ========== STEP 1: Create Cart ==========
+            $cartResponse = $magentoService->post("customers/{$customerId}/carts");
+            $cartId = $cartResponse['value'] ?? $cartResponse['id'] ?? $cartResponse['cart_id'] ?? $cartResponse;
 
-            if (!$cartId && is_numeric($cartIdResponse[0] ?? null)) {
-                $cartId = $cartIdResponse[0];
+            if (!$cartId || !is_numeric($cartId)) {
+                if (is_array($cartResponse) && isset($cartResponse[0])) {
+                    $cartId = $cartResponse[0];
+                }
             }
 
             if (!$cartId) {
-                throw new \Exception('Magento did not return a cart ID for the selected customer');
+                throw new \Exception('Failed to create cart');
             }
 
-            // Step 2: Add items to cart
+            Log::info('Cart created', ['cart_id' => $cartId]);
+
+            // ========== STEP 2: Add Items to Cart ==========
             foreach ($orderData['items'] as $item) {
                 $magentoService->post("carts/{$cartId}/items", [
                     'cartItem' => [
@@ -552,58 +557,134 @@ class OrderService
                         'quote_id' => (string) $cartId,
                     ],
                 ]);
+                Log::info('Item added', ['sku' => $item['sku']]);
             }
 
-            // Step 3: Apply coupon if provided
+            // ========== STEP 3: Apply Coupon (if provided) ==========
             if (!empty($orderData['coupon_code'])) {
                 try {
                     $magentoService->put("carts/{$cartId}/coupons/" . rawurlencode($orderData['coupon_code']), []);
+                    Log::info('Coupon applied', ['coupon' => $orderData['coupon_code']]);
                 } catch (\Exception $e) {
-                    \Log::warning('Failed to apply coupon', [
-                        'cart_id' => $cartId,
-                        'coupon' => $orderData['coupon_code'],
-                        'error' => $e->getMessage()
-                    ]);
+                    Log::warning('Coupon failed', ['error' => $e->getMessage()]);
                 }
             }
 
-            // Step 4: Format addresses
-            $shippingAddress = $this->formatMagentoAddress($orderData['shipping_address'], $orderData['customer']['email']);
-            $billingAddress = $this->formatMagentoAddress($orderData['billing_address'], $orderData['customer']['email']);
+            // ========== STEP 4: Set Billing Address ==========
+            $billingAddressData = [
+                'address' => [
+                    'firstname' => $orderData['billing_address']['firstname'],
+                    'lastname' => $orderData['billing_address']['lastname'],
+                    'street' => [$orderData['billing_address']['street']],
+                    'city' => $orderData['billing_address']['city'],
+                    'country_id' => $orderData['billing_address']['country_id'],
+                    'postcode' => $orderData['billing_address']['postcode'],
+                    'telephone' => $orderData['billing_address']['telephone'] ?? '0000000000',
+                    'email' => $orderData['customer']['email'],
+                ]
+            ];
 
-            // Step 5: Set shipping information
-            $shippingInfo = $magentoService->post("carts/{$cartId}/shipping-information", [
+            $magentoService->post("carts/{$cartId}/billing-address", $billingAddressData);
+            Log::info('Billing address set');
+
+            // ========== STEP 5: Set Shipping Information ==========
+            $shippingAddressData = [
                 'addressInformation' => [
-                    'shipping_address' => $shippingAddress,
-                    'billing_address' => $billingAddress,
+                    'shipping_address' => [
+                        'firstname' => $orderData['shipping_address']['firstname'],
+                        'lastname' => $orderData['shipping_address']['lastname'],
+                        'street' => [$orderData['shipping_address']['street']],
+                        'city' => $orderData['shipping_address']['city'],
+                        'country_id' => $orderData['shipping_address']['country_id'],
+                        'postcode' => $orderData['shipping_address']['postcode'],
+                        'telephone' => $orderData['shipping_address']['telephone'] ?? '0000000000',
+                        'email' => $orderData['customer']['email'],
+                    ],
+                    'billing_address' => [
+                        'firstname' => $orderData['billing_address']['firstname'],
+                        'lastname' => $orderData['billing_address']['lastname'],
+                        'street' => [$orderData['billing_address']['street']],
+                        'city' => $orderData['billing_address']['city'],
+                        'country_id' => $orderData['billing_address']['country_id'],
+                        'postcode' => $orderData['billing_address']['postcode'],
+                        'telephone' => $orderData['billing_address']['telephone'] ?? '0000000000',
+                        'email' => $orderData['customer']['email'],
+                    ],
                     'shipping_carrier_code' => $orderData['shipping_method']['carrier_code'],
                     'shipping_method_code' => $orderData['shipping_method']['method_code'],
-                ],
-            ]);
+                ]
+            ];
 
-            // ✅ Step 6: Set payment method using the correct endpoint
-            // Use PUT request to set selected payment method
-            $paymentResponse = $magentoService->put("carts/{$cartId}/selected-payment-method", [
-                'method' => $orderData['payment_method'],
-            ]);
+            $magentoService->post("carts/{$cartId}/shipping-information", $shippingAddressData);
+            Log::info('Shipping information set');
 
-            // Step 7: Place the order (convert cart to order)
-            $createdOrderResponse = $magentoService->put("carts/{$cartId}/order", []);
+            // ========== STEP 6: Get and Set Payment Method ==========
+            // Get available payment methods from Magento
+            $availableMethods = $magentoService->get("carts/{$cartId}/payment-methods");
 
-            $magentoOrderId = $createdOrderResponse['value'] ?? $createdOrderResponse['order_id'] ?? $createdOrderResponse['entity_id'] ?? null;
-            $magentoOrder = null;
-
-            if ($magentoOrderId) {
-                $magentoOrder = $magentoService->get("orders/{$magentoOrderId}");
-            } else {
-                $magentoOrder = $this->findLatestMagentoOrderForCustomer($magentoService, $customerId, $store->magento_store_id);
+            if (empty($availableMethods)) {
+                throw new \Exception('No payment methods available for this cart');
             }
+
+            $requestedMethod = $orderData['payment_method'];
+            $selectedMethod = null;
+
+            // Find requested method in available methods
+            foreach ($availableMethods as $method) {
+                if ($method['code'] === $requestedMethod) {
+                    $selectedMethod = $requestedMethod;
+                    break;
+                }
+            }
+
+            // If not found, use first available
+            if (!$selectedMethod) {
+                $selectedMethod = $availableMethods[0]['code'];
+                Log::warning('Payment method not available, using fallback', [
+                    'requested' => $requestedMethod,
+                    'fallback' => $selectedMethod
+                ]);
+            }
+
+            // Set payment method (Magento 2 correct endpoint)
+            $magentoService->put("carts/{$cartId}/selected-payment-method", [
+                'method' => $selectedMethod
+            ]);
+            Log::info('Payment method set', ['method' => $selectedMethod]);
+
+            // ========== STEP 7: Place Order ==========
+            $orderResponse = $magentoService->put("carts/{$cartId}/order", []);
+            Log::info('Order placed', ['response' => $orderResponse]);
+
+            // Get order ID from response
+            $magentoOrderId = $orderResponse['value'] ?? $orderResponse['order_id'] ?? $orderResponse['entity_id'] ?? $orderResponse;
+
+            if (!$magentoOrderId || !is_numeric($magentoOrderId)) {
+                if (is_array($orderResponse) && isset($orderResponse[0])) {
+                    $magentoOrderId = $orderResponse[0];
+                }
+            }
+
+            if (!$magentoOrderId) {
+                // Try to get latest order for this customer
+                $latestOrder = $this->findLatestMagentoOrderForCustomer($magentoService, $customerId, $store->magento_store_id);
+                if ($latestOrder) {
+                    $magentoOrderId = $latestOrder['entity_id'];
+                }
+            }
+
+            if (!$magentoOrderId) {
+                throw new \Exception('Order placed but could not retrieve order ID');
+            }
+
+            // ========== STEP 8: Fetch Order Details ==========
+            $magentoOrder = $magentoService->get("orders/{$magentoOrderId}");
 
             if (!$magentoOrder || empty($magentoOrder['entity_id'])) {
-                throw new \Exception('Magento order was created but could not be fetched for synchronization');
+                throw new \Exception('Failed to fetch order details');
             }
 
-            // Sync the created order to local database
+            // ========== STEP 9: Sync to Local Database ==========
             $syncResult = $this->syncSingleOrder($magentoOrder, $vendor, [
                 'store_uuid' => $store->uuid,
                 'magento_store_id' => $store->magento_store_id,
@@ -611,7 +692,7 @@ class OrderService
 
             $localOrder = $syncResult['order'] ?? Order::where('magento_order_id', $magentoOrder['entity_id'])->first();
 
-            // Add history comment if provided
+            // ========== STEP 10: Add Order History Comment ==========
             if ($localOrder && !empty($orderData['history']['append_comment']) && !empty($orderData['history']['comment'])) {
                 $this->recordOrderHistory($localOrder, $localOrder->status, $orderData['history']['comment'], $userId, [
                     'email_confirmation' => (bool) ($orderData['history']['email_confirmation'] ?? false),
@@ -626,14 +707,15 @@ class OrderService
                 'cart_id' => $cartId,
                 'magento_order_id' => $magentoOrder['entity_id'],
                 'magento_order_increment_id' => $magentoOrder['increment_id'] ?? null,
-                'shipping_information' => $shippingInfo,
-                'payment_response' => $paymentResponse,
-                'order_place_response' => $createdOrderResponse,
-                'sync' => $syncResult,
                 'order' => $localOrder,
+                'sync' => $syncResult,
             ];
         } catch (\Exception $e) {
             DB::rollBack();
+            Log::error('Manual order creation failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
             throw $e;
         }
     }
@@ -769,20 +851,25 @@ class OrderService
      */
     protected function findLatestMagentoOrderForCustomer(MagentoService $magentoService, int $customerId, int $magentoStoreId): ?array
     {
-        $response = $magentoService->get('orders', [
-            'searchCriteria[filter_groups][0][filters][0][field]' => 'customer_id',
-            'searchCriteria[filter_groups][0][filters][0][value]' => $customerId,
-            'searchCriteria[filter_groups][0][filters][0][condition_type]' => 'eq',
-            'searchCriteria[filter_groups][1][filters][0][field]' => 'store_id',
-            'searchCriteria[filter_groups][1][filters][0][value]' => $magentoStoreId,
-            'searchCriteria[filter_groups][1][filters][0][condition_type]' => 'eq',
-            'searchCriteria[sortOrders][0][field]' => 'created_at',
-            'searchCriteria[sortOrders][0][direction]' => 'DESC',
-            'searchCriteria[currentPage]' => 1,
-            'searchCriteria[pageSize]' => 1,
-        ]);
+        try {
+            $response = $magentoService->get('orders', [
+                'searchCriteria[filter_groups][0][filters][0][field]' => 'customer_id',
+                'searchCriteria[filter_groups][0][filters][0][value]' => $customerId,
+                'searchCriteria[filter_groups][0][filters][0][condition_type]' => 'eq',
+                'searchCriteria[filter_groups][1][filters][0][field]' => 'store_id',
+                'searchCriteria[filter_groups][1][filters][0][value]' => $magentoStoreId,
+                'searchCriteria[filter_groups][1][filters][0][condition_type]' => 'eq',
+                'searchCriteria[sortOrders][0][field]' => 'created_at',
+                'searchCriteria[sortOrders][0][direction]' => 'DESC',
+                'searchCriteria[currentPage]' => 1,
+                'searchCriteria[pageSize]' => 1,
+            ]);
 
-        return $response['items'][0] ?? null;
+            return $response['items'][0] ?? null;
+        } catch (\Exception $e) {
+            Log::error('Failed to find latest order', ['error' => $e->getMessage()]);
+            return null;
+        }
     }
 
     /**
